@@ -6,7 +6,7 @@ A general-purpose Julia module that gives you a Turing-complete analog computati
 
 [![Julia](https://img.shields.io/badge/julia-1.9%2B-9558B2)](https://julialang.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-2087%20passing-brightgreen)](#tests)
+[![Tests](https://img.shields.io/badge/tests-3401%20passing-brightgreen)](#tests)
 
 ---
 
@@ -149,13 +149,65 @@ enable_jitter!()           # restore previous ratio
 is_jitter_enabled()        # → Bool
 ```
 
+## Scoped jitter control
+
+Three layers between *global on/off* and *per-value `crystalize`*, so you can freeze precisely what needs freezing without touching the rest of the system.
+
+### Block-scoped override (task-local)
+
+```julia
+# disable jitter for one block (everything inside reads ε = 0)
+with_jitter(false) do
+    accumulate!(acc, 1.0)   # exact
+    recall(cache, query)    # exact value out
+end
+
+# use a tighter ratio for one block
+with_jitter(0.001) do
+    monte_carlo_thing()     # 0.1% jitter instead of 3%
+end
+
+# nests cleanly; restores to outer scope on exit (and on exceptions)
+with_jitter(0.01) do
+    with_jitter(0.0001) do
+        # ε = 0.0001 here
+    end
+    # ε = 0.01 here, not the global value
+end
+```
+
+The override is stored in `task_local_storage()`, so concurrent tasks don't trample each other.
+
+### Single-expression macros
+
+```julia
+result = @no_jitter expensive_calc(x, y)             # ε = 0 for one expression
+result = @with_jitter 0.0005 expensive_calc(x, y)    # custom ratio for one expression
+```
+
+### Per-instance freeze
+
+Every stateful container exposes `crystalize!`, `uncrystalize!`, and `is_crystalized`:
+
+```julia
+crystalize!(acc::AnalogAccumulator)   # value reads exact, accumulate!/decay! become no-ops
+crystalize!(cache::HopfieldCache)     # recall returns exact stored value, decay_all! no-ops
+crystalize!(field::AmbientField)      # sample_field returns the baseline deterministically
+crystalize!(pop::Population)          # bulk_decay!/bulk_reinforce! no-op; cascades to every bead
+crystalize!(pop::Population; cascade=false)  # freeze only the population, not the beads
+```
+
+All four are reversible via `uncrystalize!`.
+
+The four mechanisms compose: a per-instance freeze beats a `with_jitter(0.05)` block, and `with_jitter(false)` beats a non-frozen instance. Use the most specific tool that gets the job done.
+
 ## Tests
 
 ```bash
 julia --project=. -e 'using Pkg; Pkg.test()'
 ```
 
-Currently **2087 tests passing** across 8 test files, covering jitter bounds, sentinel pass-through, crystalize propagation rules, divide-by-zero handling, fuzzy comparison kernels, Turing-complete control flow, Hopfield store/recall/eviction, strength-bead grave transitions, and integration scenarios (analog factorial, Newton's method, vote loops, memoized recursion, jitter-rampup invariants).
+Currently **3401 tests passing** across 9 test files, covering jitter bounds, sentinel pass-through, crystalize propagation rules, divide-by-zero handling, fuzzy comparison kernels, Turing-complete control flow, Hopfield store/recall/eviction, strength-bead grave transitions, scoped jitter overrides (nesting, exception safety, task isolation), per-instance crystalize for accumulator/cache/field/population, and integration scenarios (analog factorial, Newton's method, vote loops, memoized recursion, jitter-rampup invariants).
 
 ## Design constants (the load-bearing numbers)
 

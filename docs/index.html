@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="description" content="AnalogTuring.jl — make digital values behave analog. Comprehensive manual.">
-<title>AnalogTuring.jl :: Manual v0.1.0</title>
+<title>AnalogTuring.jl :: Manual v0.2.0</title>
 <style>
 /* AnalogTuring.jl manual -- 90s minimalist. No webfonts, no images,
    no JavaScript. System monospace, phosphor green on near-black,
@@ -199,9 +199,9 @@ footer a { color: #5ff5ff; }
   <h1>AnalogTuring.jl</h1>
   <div class="subtitle">// make digital values behave analog. every value wiggles, then snaps back, unless you crystalize it.</div>
   <div class="meta">
-    <span>VERSION <b>0.1.0</b></span>
+    <span>VERSION <b>0.2.0</b></span>
     <span>JULIA <b>1.9+</b></span>
-    <span>TESTS <b>2087 / 2087</b></span>
+    <span>TESTS <b>3401 / 3401</b></span>
     <span>LICENSE <b>MIT</b></span>
     <span>REPO <b><a href="https://github.com/grug-group420/analog-turing">grug-group420 / analog-turing</a></b></span>
   </div>
@@ -220,6 +220,7 @@ footer a { color: #5ff5ff; }
         <li><a href="#hello">Hello, jitter</a></li>
         <li><a href="#crystalize">Opting out: crystalize</a></li>
         <li><a href="#config">Global configuration</a></li>
+        <li><a href="#scoped">Scoped jitter control</a></li>
       </ol>
     </li>
     <li><a href="#cookbook">Cookbook</a>
@@ -271,7 +272,7 @@ footer a { color: #5ff5ff; }
 
 <div class="banner">
 +============================================================+
-|  ANALOGTURING.JL // OFFICIAL MANUAL // v0.1.0              |
+|  ANALOGTURING.JL // OFFICIAL MANUAL // v0.2.0              |
 |  PHOSPHOR EDITION // READABLE BY HUMANS // NOT YOUR MOM    |
 +============================================================+
 </div>
@@ -321,7 +322,7 @@ Pkg.<span class="tok-fn">add</span>(url=<span class="tok-str">"https://github.co
 <p>Requires Julia <strong>1.9 or newer</strong>. Dependencies (<code>Random</code>, <code>Statistics</code>, <code>Distributions</code>) are pulled in automatically by <code>Pkg.instantiate()</code>.</p>
 
 <div class="box note">
-<p>If <code>Pkg.test()</code> reports anything other than <code>2087 passed</code>, file an issue with the failing test name and your Julia version. The tests are the contract.</p>
+<p>If <code>Pkg.test()</code> reports anything other than <code>3401 passed</code>, file an issue with the failing test name and your Julia version. The tests are the contract.</p>
 </div>
 
 <h3 id="hello">1.2 &nbsp; Hello, jitter</h3>
@@ -373,6 +374,55 @@ Crystalization propagation follows an <em>all-or-nothing</em> rule rather than t
 
 <div class="box warn">
 <p>Calling <code>set_jitter_ratio!</code> with a value outside <code>[0.0, 0.10]</code> throws <code>ArgumentError</code>. The upper cap is not negotiable &mdash; values above 10% break convergence in <code>auntil_converged</code> and produce non-monotone behavior in <code>HopfieldCache</code> recall.</p>
+</div>
+
+<h3 id="scoped">1.5 &nbsp; Scoped jitter control</h3>
+
+<p>Global on/off is a sledgehammer. Per-value <code>crystalize</code> is a scalpel. In between, three middle layers exist for the common case: "freeze this block, this expression, or this container &mdash; not the whole world."</p>
+
+<p><strong>Block-scoped override</strong> &mdash; the override is stored in <code>task_local_storage()</code>, so concurrent tasks don't trample each other. Restoration is exception-safe (<code>try / finally</code>):</p>
+
+<pre data-lang="julia"><span class="tok-com"># disable jitter for one block; everything inside reads &epsilon; = 0</span>
+<span class="tok-fn">with_jitter</span>(<span class="tok-kw">false</span>) <span class="tok-kw">do</span>
+    <span class="tok-fn">accumulate!</span>(acc, <span class="tok-num">1.0</span>)   <span class="tok-com"># exact</span>
+    <span class="tok-fn">recall</span>(cache, query)    <span class="tok-com"># exact value out</span>
+<span class="tok-kw">end</span>
+
+<span class="tok-com"># or use a tighter ratio for one block</span>
+<span class="tok-fn">with_jitter</span>(<span class="tok-num">0.001</span>) <span class="tok-kw">do</span>
+    <span class="tok-fn">monte_carlo_thing</span>()     <span class="tok-com"># 0.1% jitter instead of 3%</span>
+<span class="tok-kw">end</span>
+
+<span class="tok-com"># nests cleanly: inner restores to outer, not to global</span>
+<span class="tok-fn">with_jitter</span>(<span class="tok-num">0.01</span>) <span class="tok-kw">do</span>
+    <span class="tok-fn">with_jitter</span>(<span class="tok-num">0.0001</span>) <span class="tok-kw">do</span>
+        <span class="tok-com"># &epsilon; = 0.0001 here</span>
+    <span class="tok-kw">end</span>
+    <span class="tok-com"># &epsilon; = 0.01 here, NOT the global value</span>
+<span class="tok-kw">end</span></pre>
+
+<p><strong>Single-expression macros</strong> &mdash; sugar over <code>with_jitter</code> for one-liners:</p>
+
+<pre data-lang="julia">result = <span class="tok-fn">@no_jitter</span> <span class="tok-fn">expensive_calc</span>(x, y)             <span class="tok-com"># &epsilon; = 0 for one expr</span>
+result = <span class="tok-fn">@with_jitter</span> <span class="tok-num">0.0005</span> <span class="tok-fn">expensive_calc</span>(x, y)    <span class="tok-com"># custom ratio</span></pre>
+
+<p><strong>Per-instance freeze</strong> &mdash; every stateful container exposes the same trio (<code>crystalize!</code>, <code>uncrystalize!</code>, <code>is_crystalized</code>):</p>
+
+<pre data-lang="julia"><span class="tok-fn">crystalize!</span>(acc::<span class="tok-type">AnalogAccumulator</span>)    <span class="tok-com"># reads exact, accumulate!/decay! no-op</span>
+<span class="tok-fn">crystalize!</span>(cache::<span class="tok-type">HopfieldCache</span>)      <span class="tok-com"># recall exact, decay_all! no-op</span>
+<span class="tok-fn">crystalize!</span>(field::<span class="tok-type">AmbientField</span>)       <span class="tok-com"># sample_field returns the baseline</span>
+<span class="tok-fn">crystalize!</span>(pop::<span class="tok-type">Population</span>)            <span class="tok-com"># bulk ops no-op; cascades to every bead</span>
+<span class="tok-fn">crystalize!</span>(pop::<span class="tok-type">Population</span>; cascade=<span class="tok-kw">false</span>)  <span class="tok-com"># freeze pop only, beads still mutable</span>
+<span class="tok-fn">uncrystalize!</span>(x)                       <span class="tok-com"># reversible for all of the above</span></pre>
+
+<div class="box grug">
+<p><strong>[ GRUG SAY ]</strong></p>
+<p>Four ways to freeze rock. Pick smallest hammer that does job. Want one rock frozen? <code>crystalize</code> the value. Want one bag of rocks frozen? <code>crystalize!</code> the container. Want one ritual to be exact? <code>with_jitter(false) do ... end</code>. Want all rocks everywhere to stop wiggling? <code>disable_jitter!()</code>. Bigger hammer, bigger swing &mdash; but smaller hammer always wins on the rock it touches.</p>
+</div>
+
+<div class="box academic">
+<p><strong>[ THE ACADEMIC EXPLANATION ]</strong></p>
+<p>The four mechanisms form a strict precedence lattice. Per-value <code>Crystalized</code> sentinels propagate through arithmetic and short-circuit jitter at the leaf level. Per-instance flags gate jitter at the container's read/write boundary. Block-scoped overrides set the effective ratio &epsilon; through Julia's <code>task_local_storage()</code>, which is per-coroutine state visible to <code>jitter_value</code> and <code>jitter_and_snap</code>. Global state is the fallback when no override is present. Composition rules: any one of the four returning <em>"don't jitter"</em> wins (logical OR over disable conditions). Restoration is via <code>try / finally</code>, so exceptions inside a <code>with_jitter</code> block still pop the override stack correctly.</p>
 </div>
 
 </section>
@@ -621,6 +671,32 @@ result = <span class="tok-fn">aretry</span>(() -&gt; <span class="tok-fn">asqrt<
   </div>
 </div>
 
+<div class="api">
+  <div class="sig"><span class="tag exp">FN</span> <span class="name">with_jitter</span>(<span class="arg">f, ratio_or_bool</span>) :: <span class="ret">Any</span></div>
+  <div class="body">
+    <p>Run <code>f()</code> with a task-local jitter override. Inside the block, <code>jitter_value</code>, <code>jitter_and_snap</code>, and every primitive that reads <code>get_jitter_ratio()</code> sees the override instead of the global value. Restoration is via <code>try / finally</code>, so the override pops correctly even if <code>f</code> throws. Override is stored in <code>task_local_storage()</code>; concurrent tasks are isolated.</p>
+    <dl>
+      <dt>ratio_or_bool</dt>
+      <dd><code>false</code> &rarr; &epsilon; = 0 inside the block; <code>true</code> &rarr; use the current global ratio (snapshotted at entry); a <code>Real</code> &rarr; use that ratio (must lie in <code>[0, JITTER_RATIO_MAX]</code>).</dd>
+      <dt class="tag throw">throws</dt><dd><code>ArgumentError</code> if <code>ratio_or_bool</code> is not <code>Bool</code>/<code>Real</code>, non-finite, negative, or above <code>JITTER_RATIO_MAX</code>.</dd>
+    </dl>
+  </div>
+</div>
+
+<div class="api">
+  <div class="sig"><span class="tag macro">MACRO</span> <span class="name">@no_jitter</span> <span class="arg">expr</span></div>
+  <div class="body">
+    <p>Sugar for <code>with_jitter(false) do; expr; end</code> &mdash; runs <code>expr</code> with &epsilon; = 0 and returns its value.</p>
+  </div>
+</div>
+
+<div class="api">
+  <div class="sig"><span class="tag macro">MACRO</span> <span class="name">@with_jitter</span> <span class="arg">ratio expr</span></div>
+  <div class="body">
+    <p>Sugar for <code>with_jitter(ratio) do; expr; end</code> &mdash; runs <code>expr</code> with the supplied ratio override and returns its value.</p>
+  </div>
+</div>
+
 <!-- =========== CoinFlip =========== -->
 <h3 id="api-coin">3.2 &nbsp; CoinFlip <a href="https://github.com/grug-group420/analog-turing/blob/main/src/CoinFlip.jl" target="_blank">[src]</a></h3>
 
@@ -857,6 +933,13 @@ result = <span class="tok-fn">aretry</span>(() -&gt; <span class="tok-fn">asqrt<
       <li><code>bulk_decay!(pop; rate)</code>, <code>bulk_reinforce!(pop, ids; delta)</code></li>
       <li><code>alive_count(pop)</code>, <code>get_bead(pop, id)</code></li>
     </ul>
+  </div>
+</div>
+
+<div class="api">
+  <div class="sig"><span class="tag exp">FN</span> <span class="name">crystalize!</span>(<span class="arg">pop::Population</span>; <span class="arg">cascade::Bool = true</span>) &middot; <span class="name">uncrystalize!</span>(<span class="arg">pop</span>; <span class="arg">cascade = true</span>) &middot; <span class="name">is_crystalized</span>(<span class="arg">pop</span>) :: <span class="ret">Bool</span></div>
+  <div class="body">
+    <p>Per-population freeze. While crystalized, <code>bulk_decay!</code> and <code>bulk_reinforce!</code> become no-ops. With <code>cascade = true</code> (the default) every bead in the population is also flipped to <code>crystalized = true</code>; with <code>cascade = false</code> only the population-wide flag is set, and individual beads remain mutable. <code>uncrystalize!(pop; cascade)</code> is the symmetric reverse.</p>
   </div>
 </div>
 
@@ -1316,7 +1399,7 @@ This costs a small amount of branch overhead at function entry but pays for itse
 <p>Expected output ends with:</p>
 
 <pre data-lang="text">Test Summary:              | Pass  Total  Time
-AnalogTuring.jl full suite | 2087   2087  8.0s
+AnalogTuring.jl full suite | 3401   3401  9.9s
      Testing AnalogTuring tests passed</pre>
 
 <p>The suite is organized into eight files under <code>test/</code>, each focused on one module plus an <code>test_integration.jl</code> that exercises composition:</p>
@@ -1346,8 +1429,9 @@ AnalogTuring.jl full suite | 2087   2087  8.0s
 <li><strong>AnalogControl</strong>: <code>abranch</code>/<code>afuzzy_branch</code>/<code>astochastic_branch</code>; <code>aloop</code>/<code>awhile</code>/<code>auntil_converged</code> with stable-for-N convergence; <code>arecurse</code> with bounded depth; <code>afixed_point</code>; <code>aguard</code>/<code>aretry</code>/<code>awith_timeout</code>.</li>
 <li><strong>AnalogMemory</strong>: <code>AnalogRegister</code>, decaying <code>AnalogAccumulator</code> (extends <code>Base.accumulate!</code>); <code>HopfieldCache</code> with hybrid cosine+L2 lookup, strength-driven crystalization; <code>AmbientField</code>.</li>
 <li><strong>StrengthField</strong>: <code>StrengthBead</code> + <code>Population</code> with <code>fire!</code>, <code>vote</code>, <code>winner_take_all</code>, <code>bulk_decay!</code>/<code>bulk_reinforce!</code>, grave-state apoptosis.</li>
-<li>2087 tests passing across 8 test files.</li>
+<li>3401 tests passing across 9 test files.</li>
 </ul>
+
 </section>
 
 <!-- ================================================================== -->
@@ -1357,7 +1441,7 @@ AnalogTuring.jl full suite | 2087   2087  8.0s
 <h2>Colophon</h2>
 
 <p>
-This document is hand-written HTML, served as a single static file plus one CSS sheet. Phosphor green <code>#39ff14</code> on near-black <code>#0a0e0a</code>, body text <code>#c8e6c8</code> for readable contrast. Headings in <a href="https://fonts.google.com/specimen/VT323" target="_blank">VT323</a>; body in <a href="https://fonts.google.com/specimen/IBM+Plex+Mono" target="_blank">IBM Plex Mono</a>. No JavaScript. No analytics. No cookie banner.
+This document is a single self-contained HTML file with an inline stylesheet. Phosphor green <code>#39ff14</code> on near-black <code>#0a0e0a</code>; body text <code>#c8e6c8</code> for readable contrast. System monospace (<code>Courier New</code>). No external CSS, no web fonts, no JavaScript, no analytics, no cookie banner. Zero network requests after the page is loaded.
 </p>
 
 <p>
@@ -1370,7 +1454,7 @@ Issues, pull requests, and corrections welcome at <a href="https://github.com/gr
 
 <div class="banner">
 +============================================================+
-|  END OF MANUAL // jitter ratio 0.03 // tests 2087 / 2087   |
+|  END OF MANUAL // jitter ratio 0.03 // tests 3401 / 3401   |
 |  GRUG SAY: ROCK WIGGLE BUT ROCK COME HOME. THAT IS WAY.    |
 +============================================================+
 </div>
@@ -1378,7 +1462,7 @@ Issues, pull requests, and corrections welcome at <a href="https://github.com/gr
 </section>
 
 <footer>
-  &copy; 2025 grug-group420 &middot; MIT licensed &middot; AnalogTuring.jl v0.1.0 &middot;
+  &copy; 2025 grug-group420 &middot; MIT licensed &middot; AnalogTuring.jl v0.2.0 &middot;
   <a href="https://github.com/grug-group420/analog-turing">github.com/grug-group420/analog-turing</a>
 </footer>
 

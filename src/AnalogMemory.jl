@@ -9,8 +9,10 @@
 module AnalogMemory
 
 using ..JitterCore: jitter_and_snap, jitter_value, snap_back!, get_jitter_ratio,
-                    Crystalized, AnalogValue, is_crystalized,
+                    Crystalized, AnalogValue,
                     CRYSTALIZE_SENTINEL, crystalize
+# GRUG: import (not using) so we can ADD methods to is_crystalized.
+import ..JitterCore: is_crystalized, crystalize!, uncrystalize!
 using ..CoinFlip: coinflip
 using ..AnalogPrimitives: _raw
 
@@ -21,8 +23,9 @@ import Base: accumulate!
 
 export AnalogRegister, set!, get_value, drift!, crystalize_register!, uncrystalize_register!
 export AnalogAccumulator, accumulate!, value, reset!, decay!
-export HopfieldCache, store!, recall, recall_top_k
+export HopfieldCache, store!, recall, recall_top_k, decay_all!
 export ambient_field, AmbientField, sample_field
+export crystalize!, uncrystalize!, is_crystalized
 
 # ============================================================================
 # ANALOG REGISTER -- single-cell wiggly memory
@@ -184,6 +187,25 @@ function decay!(acc::AnalogAccumulator; rate::Real = -1.0)
     end
 end
 
+# GRUG: freeze the accumulator. accumulate! still adds new rocks but
+# state stops jittering on read, decay! becomes no-op. uncrystalize
+# brings the wiggle back. lock-protected so safe across threads.
+function crystalize!(acc::AnalogAccumulator)
+    lock(acc.lock) do
+        acc.crystalized = true
+        return acc
+    end
+end
+
+function uncrystalize!(acc::AnalogAccumulator)
+    lock(acc.lock) do
+        acc.crystalized = false
+        return acc
+    end
+end
+
+is_crystalized(acc::AnalogAccumulator)::Bool = lock(() -> acc.crystalized, acc.lock)
+
 # ============================================================================
 # HOPFIELD CACHE -- associative pattern memory
 # ============================================================================
@@ -207,6 +229,10 @@ mutable struct HopfieldCache
     capacity::Int
     crystalize_threshold::Float64
     decay_rate::Float64
+    crystalized::Bool   # GRUG: cache-wide freeze. when true, recall returns
+                        #       exact stored values, decay_all! is no-op,
+                        #       per-recall strength bumps still happen but
+                        #       per-entry crystalize threshold is also frozen.
     lock::ReentrantLock
 end
 
@@ -225,8 +251,28 @@ function HopfieldCache(; capacity::Integer = 256,
     return HopfieldCache(HopfieldEntry[], Int(capacity),
                           Float64(crystalize_threshold),
                           Float64(decay_rate),
+                          false,                  # crystalized starts off
                           ReentrantLock())
 end
+
+# GRUG: freeze whole cache. recall returns exact value (no jitter on output),
+# decay_all! becomes no-op, but you can still store! new patterns and bump
+# strengths. think of it like "publish to read-only" mode for a memory.
+function crystalize!(cache::HopfieldCache)
+    lock(cache.lock) do
+        cache.crystalized = true
+        return cache
+    end
+end
+
+function uncrystalize!(cache::HopfieldCache)
+    lock(cache.lock) do
+        cache.crystalized = false
+        return cache
+    end
+end
+
+is_crystalized(cache::HopfieldCache)::Bool = lock(() -> cache.crystalized, cache.lock)
 
 """
     _key_near(a, b; cos_thresh=0.95, rel_l2_thresh=0.05) -> Bool
@@ -383,7 +429,8 @@ function recall(cache::HopfieldCache, query::AbstractVector{<:Real};
             end
         end
         best_e.last_recalled = time()
-        v_out = best_e.crystalized ? best_e.value : jitter_and_snap(best_e.value)
+        # GRUG: cache-wide freeze OR per-entry freeze => exact value out.
+        v_out = (cache.crystalized || best_e.crystalized) ? best_e.value : jitter_and_snap(best_e.value)
         return (v_out, best_sim)
     end
 end
@@ -407,7 +454,7 @@ function recall_top_k(cache::HopfieldCache, query::AbstractVector{<:Real},
             end
             sim = _cosine(e.key, qf)
             if sim >= min_similarity
-                v_out = e.crystalized ? e.value : jitter_and_snap(e.value)
+                v_out = (cache.crystalized || e.crystalized) ? e.value : jitter_and_snap(e.value)
                 push!(scored, (v_out, sim))
             end
         end
@@ -418,6 +465,10 @@ end
 
 function decay_all!(cache::HopfieldCache)
     lock(cache.lock) do
+        # GRUG: cache-wide freeze => no decay at all. preserves entire memory.
+        if cache.crystalized
+            return cache
+        end
         # GRUG: walk entries, shrink strength of non-crystalized.
         # if strength drop too low, evict (graveyard).
         new_entries = HopfieldEntry[]
@@ -482,6 +533,20 @@ end
 function ambient_field(; baseline::Real = 0.05, breadth::Real = 0.5)
     return AmbientField(; baseline = baseline, breadth = breadth)
 end
+
+# GRUG: freeze ambient field so sample_field returns exact baseline n times.
+# useful when you want the rest of the system noisy but the ambient floor pinned.
+function crystalize!(field::AmbientField)
+    field.crystalized = true
+    return field
+end
+
+function uncrystalize!(field::AmbientField)
+    field.crystalized = false
+    return field
+end
+
+is_crystalized(field::AmbientField)::Bool = field.crystalized
 
 # ============================================================================
 # ACADEMIC FOOTER

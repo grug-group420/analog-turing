@@ -49,6 +49,7 @@ export CRYSTALIZE_SENTINEL
 export jitter_value, jitter_and_snap, snap_back
 export enable_jitter!, disable_jitter!, is_jitter_enabled
 export set_jitter_ratio!, get_jitter_ratio
+export with_jitter, @no_jitter, @with_jitter
 export crystalize, is_crystalized, uncrystalize
 export Crystalized, AnalogValue
 
@@ -81,21 +82,22 @@ export MAX_ITERATIONS_DEFAULT, CONVERGENCE_TOL_DEFAULT
 export AnalogRegister, set!, get_value, drift!, crystalize_register!,
        uncrystalize_register!
 export AnalogAccumulator, accumulate!, value, reset!, decay!
-export HopfieldCache, store!, recall, recall_top_k
+export HopfieldCache, store!, recall, recall_top_k, decay_all!
 export ambient_field, AmbientField, sample_field
+export crystalize!, uncrystalize!, is_crystalized
 
 # ----------------------------------------------------------------------------
 # StrengthField re-exports
 # ----------------------------------------------------------------------------
 export StrengthBead, Population, register!, fire!, vote, winner_take_all
 export bump_strength!, decay_strength!, crystalize_bead!
-export bulk_decay!, bulk_reinforce!, alive_count, activation_probability
+export bulk_decay!, bulk_reinforce!, alive_count, activation_probability, get_bead
 export STRENGTH_FLOOR, STRENGTH_CAP
 
 # ----------------------------------------------------------------------------
 # Module-level metadata
 # ----------------------------------------------------------------------------
-const VERSION_STRING = "0.1.0"
+const VERSION_STRING = "0.2.0"
 const ABOUT = """
 AnalogTuring v$(VERSION_STRING)
 

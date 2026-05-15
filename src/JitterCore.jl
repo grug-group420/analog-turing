@@ -15,7 +15,9 @@ export CRYSTALIZE_SENTINEL
 export jitter_value, jitter_and_snap, snap_back
 export enable_jitter!, disable_jitter!, is_jitter_enabled
 export set_jitter_ratio!, get_jitter_ratio
+export with_jitter, @no_jitter, @with_jitter
 export crystalize, is_crystalized, uncrystalize
+export crystalize!, uncrystalize!
 export Crystalized, AnalogValue
 
 # ============================================================================
@@ -35,6 +37,13 @@ const CRYSTALIZE_SENTINEL = -9999.0
 const _JITTER_ENABLED = Ref{Bool}(true)
 const _JITTER_RATIO = Ref{Float64}(JITTER_RATIO_DEFAULT)
 const _CONFIG_LOCK = ReentrantLock()
+
+# GRUG: task-local override key. each Julia Task carry its own jitter
+# setting that wins over the global one. lets you say "no wiggle in
+# this function call please" without yelling at the whole world.
+# nothing means "no override, use global". a Float64 means "use this
+# instead of global". scoped restoration via try/finally.
+const _JITTER_OVERRIDE_KEY = :__analog_turing_jitter_override__
 
 # ============================================================================
 # CRYSTALIZE WRAPPER
@@ -119,6 +128,12 @@ function disable_jitter!()
 end
 
 function is_jitter_enabled()::Bool
+    # GRUG: task-local override beats global. if override is 0.0 then
+    # jitter is OFF for this task scope even if global is ON.
+    ovr = get(task_local_storage(), _JITTER_OVERRIDE_KEY, nothing)
+    if ovr !== nothing
+        return ovr > 0.0
+    end
     lock(_CONFIG_LOCK) do
         return _JITTER_ENABLED[]
     end
@@ -140,8 +155,107 @@ function set_jitter_ratio!(r::Real)
 end
 
 function get_jitter_ratio()::Float64
+    # GRUG: scoped override wins. if you set with_jitter(0.001) inside
+    # a do-block, that 0.001 is what comes back here -- even if global
+    # is at 0.03. nesting works because we save and restore.
+    ovr = get(task_local_storage(), _JITTER_OVERRIDE_KEY, nothing)
+    if ovr !== nothing
+        return ovr::Float64
+    end
     lock(_CONFIG_LOCK) do
         return _JITTER_RATIO[]
+    end
+end
+
+# ============================================================================
+# SCOPED OVERRIDE -- the per-function / per-block jitter switch
+# ============================================================================
+
+"""
+    with_jitter(f, ratio_or_bool)
+
+Run `f()` with the jitter ratio temporarily overridden for the current task.
+The override beats both the global enable flag and the global ratio.
+
+- `with_jitter(false) do ... end`   -- jitter OFF inside the block
+- `with_jitter(true)  do ... end`   -- jitter ON inside (uses current global ratio)
+- `with_jitter(0.001) do ... end`   -- specific ratio inside
+- `with_jitter(0.0)   do ... end`   -- equivalent to false
+
+Restoration is exception-safe via try/finally. Nesting works: inner override
+returns to the outer override (or to the global) on exit. Per-task storage,
+so concurrent tasks have independent overrides.
+
+Throws `ArgumentError` if `ratio` is non-finite or outside `[0, JITTER_RATIO_MAX]`.
+"""
+function with_jitter(f, ratio_or_bool)
+    # GRUG: figure out what number user really mean.
+    new_ratio::Float64 = if ratio_or_bool === false
+        0.0
+    elseif ratio_or_bool === true
+        # GRUG: "true" means "use whatever the global says right now,
+        #        but pin it for the scope so set_jitter_ratio! changes
+        #        outside don't leak in mid-block."
+        lock(_CONFIG_LOCK) do
+            _JITTER_ENABLED[] ? _JITTER_RATIO[] : 0.0
+        end
+    elseif ratio_or_bool isa Real
+        Float64(ratio_or_bool)
+    else
+        throw(ArgumentError("JitterCore.with_jitter: ratio_or_bool must be Bool or Real, got $(typeof(ratio_or_bool))"))
+    end
+
+    if !isfinite(new_ratio) || new_ratio < 0.0 || new_ratio > JITTER_RATIO_MAX
+        throw(ArgumentError("JitterCore.with_jitter: ratio $new_ratio must be in [0, $JITTER_RATIO_MAX]"))
+    end
+
+    tls = task_local_storage()
+    prev = get(tls, _JITTER_OVERRIDE_KEY, nothing)
+    tls[_JITTER_OVERRIDE_KEY] = new_ratio
+    try
+        return f()
+    finally
+        # GRUG: put back what was there, exception or not.
+        if prev === nothing
+            delete!(tls, _JITTER_OVERRIDE_KEY)
+        else
+            tls[_JITTER_OVERRIDE_KEY] = prev
+        end
+    end
+end
+
+"""
+    @no_jitter expr
+
+Macro form: evaluate `expr` with jitter disabled for the current task.
+Equivalent to `with_jitter(false) do; expr; end`.
+
+```julia
+exact = @no_jitter aadd(2.0, 3.0)   # always 5.0
+```
+"""
+macro no_jitter(expr)
+    quote
+        with_jitter(false) do
+            $(esc(expr))
+        end
+    end
+end
+
+"""
+    @with_jitter ratio expr
+
+Macro form: evaluate `expr` with the supplied jitter ratio.
+
+```julia
+fp = @with_jitter 0.001 newton_step(x)
+```
+"""
+macro with_jitter(ratio, expr)
+    quote
+        with_jitter($(esc(ratio))) do
+            $(esc(expr))
+        end
     end
 end
 

@@ -7,14 +7,16 @@
 module StrengthField
 
 using ..JitterCore: jitter_value, jitter_and_snap, get_jitter_ratio,
-                    Crystalized, AnalogValue, is_crystalized,
+                    Crystalized, AnalogValue,
                     CRYSTALIZE_SENTINEL
+import ..JitterCore: is_crystalized, crystalize!, uncrystalize!
 using ..CoinFlip: coinflip, weighted_coinflip, lateral_inhibition_coinflip
 using ..AnalogPrimitives: _raw
 
 export StrengthBead, Population, register!, fire!, vote, winner_take_all
 export bump_strength!, decay_strength!, crystalize_bead!
 export bulk_decay!, bulk_reinforce!, alive_count, get_bead, activation_probability
+export crystalize!, uncrystalize!, is_crystalized
 export STRENGTH_FLOOR, STRENGTH_CAP
 
 # GRUG: rock-strength bounds. nobody go below floor or above cap.
@@ -119,10 +121,14 @@ collect votes, pick winners. thread-safe via lock.
 """
 mutable struct Population
     beads::Dict{String, StrengthBead}
+    crystalized::Bool   # GRUG: population-wide freeze. when true, bulk_decay!
+                        #       and bulk_reinforce! become no-ops. fire! still
+                        #       runs but uses stored strengths exact (no jitter
+                        #       in activation_probability sampling).
     lock::ReentrantLock
 end
 
-Population() = Population(Dict{String, StrengthBead}(), ReentrantLock())
+Population() = Population(Dict{String, StrengthBead}(), false, ReentrantLock())
 
 function register!(pop::Population, bead::StrengthBead)
     lock(pop.lock) do
@@ -263,6 +269,10 @@ idle cycles to implement use-it-or-lose-it.
 """
 function bulk_decay!(pop::Population; rate::Real = 0.01)
     lock(pop.lock) do
+        # GRUG: population frozen => no decay anywhere. preserves the field.
+        if pop.crystalized
+            return pop
+        end
         for bead in values(pop.beads)
             decay_strength!(bead; rate = rate)
         end
@@ -278,6 +288,10 @@ the inverse of bulk_decay! -- this is the "right answer" reward.
 """
 function bulk_reinforce!(pop::Population, ids::Vector{String}; delta::Real = 0.5)
     lock(pop.lock) do
+        # GRUG: frozen population ignores bumps too. symmetric with decay.
+        if pop.crystalized
+            return pop
+        end
         for id in ids
             bead = get(pop.beads, id, nothing)
             if bead === nothing
@@ -289,6 +303,39 @@ function bulk_reinforce!(pop::Population, ids::Vector{String}; delta::Real = 0.5
     end
     return pop
 end
+
+# GRUG: freeze entire population. bulk_decay! and bulk_reinforce! become
+# no-ops. if cascade=true (default), also flips every individual bead's
+# crystalized flag to true so fire! treats them all as guaranteed-firing
+# pinned units. uncrystalize!(pop) reverses both.
+function crystalize!(pop::Population; cascade::Bool = true)
+    lock(pop.lock) do
+        pop.crystalized = true
+        if cascade
+            for bead in values(pop.beads)
+                bead.crystalized = true
+            end
+        end
+        return pop
+    end
+end
+
+function uncrystalize!(pop::Population; cascade::Bool = true)
+    lock(pop.lock) do
+        pop.crystalized = false
+        if cascade
+            for bead in values(pop.beads)
+                bead.crystalized = false
+            end
+        end
+        return pop
+    end
+end
+
+is_crystalized(pop::Population)::Bool = lock(() -> pop.crystalized, pop.lock)
+
+# GRUG: also expose is_crystalized for individual beads (mirrors AnalogValue).
+is_crystalized(bead::StrengthBead)::Bool = bead.crystalized
 
 # ============================================================================
 # ACADEMIC FOOTER

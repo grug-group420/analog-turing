@@ -11,5 +11,6 @@ Random.seed!(42)
     include("test_analog_control.jl")
     include("test_analog_memory.jl")
     include("test_strength_field.jl")
+    include("test_scoped_jitter.jl")
     include("test_integration.jl")
 end
