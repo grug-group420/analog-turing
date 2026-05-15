@@ -1,0 +1,1210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="AnalogTuring.jl — make digital values behave analog. Comprehensive manual.">
+<title>AnalogTuring.jl :: Manual v0.1.0</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://sites.super.myninja.ai/_assets/ninja-daytona-script.js"></script>
+</head>
+<body>
+
+<header class="crt-frame">
+  <h1>AnalogTuring.jl<span class="blink">_</span></h1>
+  <div class="subtitle">// make digital values behave analog. every value wiggles, then snaps back, unless you crystalize it.</div>
+  <div class="meta">
+    <span>VERSION <b>0.1.0</b></span>
+    <span>JULIA <b>1.9+</b></span>
+    <span>TESTS <b>2087 / 2087</b></span>
+    <span>LICENSE <b>MIT</b></span>
+    <span>REPO <b><a href="https://github.com/grug-group420/analog-turing" style="color:#39ff14">grug-group420 / analog-turing</a></b></span>
+  </div>
+</header>
+
+<div class="wrap">
+
+<!-- ================================================================== -->
+<!--                              T O C                                 -->
+<!-- ================================================================== -->
+<nav class="toc">
+  <h4>// MANUAL INDEX</h4>
+  <ol>
+    <li><a href="#about">About this document</a></li>
+    <li><a href="#getting-started">Getting started</a>
+      <ol>
+        <li><a href="#install">Installation</a></li>
+        <li><a href="#hello">Hello, jitter</a></li>
+        <li><a href="#crystalize">Opting out: crystalize</a></li>
+        <li><a href="#config">Global configuration</a></li>
+      </ol>
+    </li>
+    <li><a href="#cookbook">Cookbook</a>
+      <ol>
+        <li><a href="#cb-arith">Basic arithmetic</a></li>
+        <li><a href="#cb-coin">Coin flips and weighted choice</a></li>
+        <li><a href="#cb-control">Branches, loops, recursion</a></li>
+        <li><a href="#cb-memory">Memory: registers, accumulators, Hopfield</a></li>
+        <li><a href="#cb-strength">Strength fields and voting</a></li>
+        <li><a href="#cb-errors">Error handling and retries</a></li>
+      </ol>
+    </li>
+    <li><a href="#api">API reference</a>
+      <ol>
+        <li><a href="#api-jitter">JitterCore</a></li>
+        <li><a href="#api-coin">CoinFlip</a></li>
+        <li><a href="#api-prim">AnalogPrimitives</a></li>
+        <li><a href="#api-ctrl">AnalogControl</a></li>
+        <li><a href="#api-mem">AnalogMemory</a></li>
+        <li><a href="#api-str">StrengthField</a></li>
+        <li><a href="#api-const">Constants</a></li>
+      </ol>
+    </li>
+    <li><a href="#how-it-works">How it works</a>
+      <ol>
+        <li><a href="#how-jitter">The jitter primitive</a></li>
+        <li><a href="#how-snap">Snap-back as low-pass</a></li>
+        <li><a href="#how-crystalize">Crystalize propagation</a></li>
+        <li><a href="#how-ambient">Ambient field guarantee</a></li>
+        <li><a href="#how-strength">Strength-biased activation</a></li>
+        <li><a href="#how-hopfield">Hopfield with hybrid lookup</a></li>
+        <li><a href="#how-turing">Turing-completeness argument</a></li>
+        <li><a href="#how-errors">No-silent-failures discipline</a></li>
+      </ol>
+    </li>
+    <li><a href="#flowcharts">Flowcharts</a></li>
+    <li><a href="#design">Design constants</a></li>
+    <li><a href="#tests">Running the tests</a></li>
+    <li><a href="#changelog">Changelog</a></li>
+    <li><a href="#colophon">Colophon</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ================================================================== -->
+<!--                          A B O U T                                 -->
+<!-- ================================================================== -->
+<section id="about">
+<h2>About this document</h2>
+
+<div class="banner">
++============================================================+
+|  ANALOGTURING.JL // OFFICIAL MANUAL // v0.1.0              |
+|  PHOSPHOR EDITION // READABLE BY HUMANS // NOT YOUR MOM    |
++============================================================+
+</div>
+
+<p>
+This is the manual for <code>AnalogTuring.jl</code>, a Julia module that gives you a Turing-complete <em>analog</em> computational substrate on top of digital floating-point. Every value passing through the module gets a small bounded perturbation (default &plusmn;3%) and snaps back toward its baseline &mdash; unless you wrap it in <code>crystalize</code>, which makes it solid forever.
+</p>
+
+<p>
+The manual follows the <a href="https://www.php.net/manual/en/" target="_blank" rel="noopener">PHP Manual</a> convention: <strong>how to use it comes first</strong>, then a complete API reference, then a deep dive on internals, then flowcharts, then design notes. Every concept is given twice &mdash; once in the GRUG caveman-for-dummies style, then again as an intermediate-academic explanation. Pick whichever lands.
+</p>
+
+<div class="box grug">
+<p>grug make this thing because digital rocks too sharp. every time you add 2 + 3 you get 5 exact. real world not like that. real world rocks shake a little. your hand shake. your eye shake. brain shake. when brain pretend to be analog with too-sharp rocks, it break in funny ways. ties never break. equal-rocks all win at same time. cave too quiet. so this module say: every rock wiggle little bit, then come back home. unless you say "no, this rock solid, do not touch". that is whole idea. simple.</p>
+</div>
+
+<div class="box academic">
+<p>
+The library imposes a small zero-mean stochastic perturbation on every floating-point intermediate (the <em>jitter</em>) followed by an exponential pull toward a per-value baseline (the <em>snap-back</em>). Bounded by a global ratio &epsilon;&nbsp;&isin;&nbsp;[0,&nbsp;0.10] with default 0.03, this perturbation preserves expectations to first order while breaking ties stochastically, which is exactly the property required to model competitive populations, fuzzy associative recall, ambient cortical activity, and any other dynamical regime where exact equality is a bug rather than a feature. The <code>Crystalized{T}</code> wrapper provides a typed opt-out, and the propagation rule &mdash; "result is exact iff every operand was crystalized" &mdash; keeps the system inductively safe: a single non-crystalized input is sufficient to re-randomize the entire downstream chain.
+</p>
+</div>
+
+<p>
+If you only read one section, read <a href="#getting-started">Getting started</a> &mdash; you can build something useful in five minutes from there.
+</p>
+</section>
+
+<!-- ================================================================== -->
+<!--                  G E T T I N G   S T A R T E D                     -->
+<!-- ================================================================== -->
+<section id="getting-started">
+<h2>Getting started</h2>
+
+<h3 id="install">1.1 &nbsp; Installation</h3>
+
+<p>The package is not yet in the Julia general registry. Install directly from the GitHub repo:</p>
+
+<pre data-lang="julia"><span class="tok-kw">using</span> Pkg
+Pkg.<span class="tok-fn">add</span>(url=<span class="tok-str">"https://github.com/grug-group420/analog-turing"</span>)</pre>
+
+<p>Or clone for local development:</p>
+
+<pre data-lang="bash"><span class="cmd-prompt">git clone https://github.com/grug-group420/analog-turing</span>
+<span class="cmd-prompt">cd analog-turing</span>
+<span class="cmd-prompt">julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.test()'</span></pre>
+
+<p>Requires Julia <strong>1.9 or newer</strong>. Dependencies (<code>Random</code>, <code>Statistics</code>, <code>Distributions</code>) are pulled in automatically by <code>Pkg.instantiate()</code>.</p>
+
+<div class="box note">
+<p>If <code>Pkg.test()</code> reports anything other than <code>2087 passed</code>, file an issue with the failing test name and your Julia version. The tests are the contract.</p>
+</div>
+
+<h3 id="hello">1.2 &nbsp; Hello, jitter</h3>
+
+<p>Drop into the REPL and watch sums refuse to sit still:</p>
+
+<pre data-lang="julia"><span class="julia-prompt"><span class="tok-kw">using</span> AnalogTuring</span>
+
+<span class="julia-prompt"><span class="tok-fn">aadd</span>(<span class="tok-num">2.0</span>, <span class="tok-num">3.0</span>)</span>
+<span class="tok-com">5.012883417629045</span>
+
+<span class="julia-prompt"><span class="tok-fn">aadd</span>(<span class="tok-num">2.0</span>, <span class="tok-num">3.0</span>)</span>
+<span class="tok-com">4.973159820774432</span>
+
+<span class="julia-prompt"><span class="tok-fn">amul</span>(<span class="tok-num">4.0</span>, <span class="tok-num">5.0</span>)</span>
+<span class="tok-com">19.94022183947113</span></pre>
+
+<p>That's the whole library in three lines. Every output is the true sum (or product) plus a uniform noise term in &plusmn;3% of its magnitude, then pulled back toward its baseline. Statistically the mean is exact; instantaneously, every read is different.</p>
+
+<h3 id="crystalize">1.3 &nbsp; Opting out: <code>crystalize</code></h3>
+
+<p>When you actually need exact arithmetic &mdash; loop counters, control thresholds, fixed constants &mdash; wrap the value:</p>
+
+<pre data-lang="julia"><span class="julia-prompt"><span class="tok-fn">aadd</span>(<span class="tok-fn">crystalize</span>(<span class="tok-num">2.0</span>), <span class="tok-fn">crystalize</span>(<span class="tok-num">3.0</span>))</span>
+<span class="tok-com">❄(5.0)        # exact, every time</span>
+
+<span class="julia-prompt"><span class="tok-fn">aadd</span>(<span class="tok-fn">crystalize</span>(<span class="tok-num">2.0</span>), <span class="tok-num">3.0</span>)</span>
+<span class="tok-com">5.034827...   # MIXED inputs → still jittered</span></pre>
+
+<div class="box grug">
+<p>rule: all rocks solid &rarr; answer solid. one rock wiggle &rarr; answer wiggle too. wiggle is contagious. like flu. you cannot half-freeze water. either it ice, or it slosh. this is the only rule you need to remember.</p>
+</div>
+
+<div class="box academic">
+<p>
+Crystalization propagation follows an <em>all-or-nothing</em> rule rather than the more common <em>first-class</em> or <em>dominant</em> rule. Formally, for any <code>n</code>-ary operation <code>f(x&#8321;,&hellip;,x&#8345;)</code>, the result is wrapped in <code>Crystalized</code> if and only if <code>&forall;i. is_crystalized(x&#8345;) = true</code>. This makes jitter the absorbing element of the (Crystalized, jittered) lattice and guarantees that a single un-frozen operand is sufficient to re-introduce stochasticity into the downstream computation. The choice prevents a class of subtle bugs where a partially-crystalized intermediate would otherwise propagate exactness through a chain that the user expected to be noisy.
+</p>
+</div>
+
+<h3 id="config">1.4 &nbsp; Global configuration</h3>
+
+<p>Three knobs, all process-global and thread-safe:</p>
+
+<pre data-lang="julia"><span class="tok-fn">get_jitter_ratio</span>()         <span class="tok-com"># → 0.03  (default)</span>
+<span class="tok-fn">set_jitter_ratio!</span>(<span class="tok-num">0.05</span>)    <span class="tok-com"># bounded to [0.0, 0.10]</span>
+<span class="tok-fn">disable_jitter!</span>()           <span class="tok-com"># ε := 0, ops become exact</span>
+<span class="tok-fn">enable_jitter!</span>()            <span class="tok-com"># restore the previous ratio</span>
+<span class="tok-fn">is_jitter_enabled</span>()         <span class="tok-com"># → Bool</span></pre>
+
+<div class="box warn">
+<p>Calling <code>set_jitter_ratio!</code> with a value outside <code>[0.0, 0.10]</code> throws <code>ArgumentError</code>. The upper cap is not negotiable &mdash; values above 10% break convergence in <code>auntil_converged</code> and produce non-monotone behavior in <code>HopfieldCache</code> recall.</p>
+</div>
+
+</section>
+
+<!-- ================================================================== -->
+<!--                        C O O K B O O K                             -->
+<!-- ================================================================== -->
+<section id="cookbook">
+<h2>Cookbook</h2>
+
+<p>Working recipes for the things you will actually do. Each recipe shows a complete, runnable snippet. Copy, paste, adapt.</p>
+
+<h3 id="cb-arith">2.1 &nbsp; Basic arithmetic</h3>
+
+<pre data-lang="julia"><span class="tok-kw">using</span> AnalogTuring
+
+<span class="tok-com"># Plain ops -- always jittered.</span>
+<span class="tok-fn">aadd</span>(<span class="tok-num">1.0</span>, <span class="tok-num">2.0</span>)        <span class="tok-com"># ≈ 3.0</span>
+<span class="tok-fn">asub</span>(<span class="tok-num">5.0</span>, <span class="tok-num">2.0</span>)        <span class="tok-com"># ≈ 3.0</span>
+<span class="tok-fn">amul</span>(<span class="tok-num">4.0</span>, <span class="tok-num">5.0</span>)        <span class="tok-com"># ≈ 20.0</span>
+<span class="tok-fn">adiv</span>(<span class="tok-num">10.0</span>, <span class="tok-num">3.0</span>)       <span class="tok-com"># ≈ 3.333…   throws on /0</span>
+<span class="tok-fn">asqrt</span>(<span class="tok-num">2.0</span>)             <span class="tok-com"># ≈ 1.414     throws on negatives</span>
+<span class="tok-fn">aexp</span>(<span class="tok-num">1.0</span>)              <span class="tok-com"># ≈ ℯ          warns on overflow</span>
+
+<span class="tok-com"># Comparisons -- crisp (Bool) and fuzzy (Float in [0,1]).</span>
+<span class="tok-fn">aeq</span>(<span class="tok-num">1.0</span>, <span class="tok-num">1.000_001</span>; tol=<span class="tok-num">1e-3</span>)   <span class="tok-com"># true</span>
+<span class="tok-fn">afuzzy_eq</span>(<span class="tok-num">0.0</span>, <span class="tok-num">0.5</span>; tol=<span class="tok-num">1.0</span>)    <span class="tok-com"># 0.7788  (Gaussian kernel)</span>
+<span class="tok-fn">afuzzy_lt</span>(<span class="tok-num">0.0</span>, <span class="tok-num">10.0</span>)             <span class="tok-com"># 0.999…  (logistic)</span>
+
+<span class="tok-com"># Aggregations.</span>
+xs = [<span class="tok-num">1.0</span>, <span class="tok-num">3.0</span>, <span class="tok-num">2.0</span>, <span class="tok-num">5.0</span>, <span class="tok-num">4.0</span>]
+<span class="tok-fn">amin</span>(xs)                  <span class="tok-com"># ≈ 1.0</span>
+<span class="tok-fn">amax</span>(xs)                  <span class="tok-com"># ≈ 5.0</span>
+<span class="tok-fn">amean</span>(xs)                 <span class="tok-com"># ≈ 3.0</span>
+<span class="tok-fn">aclamp</span>(<span class="tok-num">7.0</span>, <span class="tok-num">0.0</span>, <span class="tok-num">5.0</span>)     <span class="tok-com"># ≈ 5.0  (jittered bound)</span>
+<span class="tok-fn">aselect</span>(<span class="tok-num">0.7</span>, <span class="tok-num">10.0</span>, <span class="tok-num">20.0</span>)   <span class="tok-com"># 70% chance of ≈10</span></pre>
+
+<h3 id="cb-coin">2.2 &nbsp; Coin flips and weighted choice</h3>
+
+<pre data-lang="julia"><span class="tok-com"># Macro form -- inline binary branch.</span>
+result = <span class="tok-mac">@coinflip</span> <span class="tok-num">0.7</span> <span class="tok-str">"heads"</span> <span class="tok-str">"tails"</span>
+
+<span class="tok-com"># Function form.</span>
+<span class="tok-fn">coinflip</span>(<span class="tok-num">0.5</span>)                  <span class="tok-com"># Bool, fair-ish under jitter</span>
+
+<span class="tok-com"># Pick one of N by weight.</span>
+<span class="tok-fn">weighted_coinflip</span>([<span class="tok-num">1.0</span>, <span class="tok-num">2.0</span>, <span class="tok-num">3.0</span>])   <span class="tok-com"># → 1, 2, or 3 (idx)</span>
+
+<span class="tok-com"># Strict probability vector (must sum to 1.0 ± 1e-3).</span>
+<span class="tok-fn">categorical_coinflip</span>([<span class="tok-num">0.2</span>, <span class="tok-num">0.5</span>, <span class="tok-num">0.3</span>])
+
+<span class="tok-com"># Lateral inhibition -- temperature controls softmax↔hardmax.</span>
+<span class="tok-fn">lateral_inhibition_coinflip</span>([<span class="tok-num">1.0</span>, <span class="tok-num">2.0</span>, <span class="tok-num">3.0</span>]; sharpness=<span class="tok-num">0.5</span>)   <span class="tok-com"># soft</span>
+<span class="tok-fn">lateral_inhibition_coinflip</span>([<span class="tok-num">1.0</span>, <span class="tok-num">2.0</span>, <span class="tok-num">3.0</span>]; sharpness=<span class="tok-num">5.0</span>)   <span class="tok-com"># hard, almost always 3</span></pre>
+
+<h3 id="cb-control">2.3 &nbsp; Branches, loops, recursion</h3>
+
+<pre data-lang="julia"><span class="tok-com"># Crisp branch (deterministic on the predicate).</span>
+<span class="tok-fn">abranch</span>(() -&gt; x &gt; <span class="tok-num">0</span>, () -&gt; <span class="tok-str">"pos"</span>, () -&gt; <span class="tok-str">"neg"</span>)
+
+<span class="tok-com"># Fuzzy branch -- score in [0,1] is taken AS the probability.</span>
+<span class="tok-fn">afuzzy_branch</span>(<span class="tok-num">0.7</span>, () -&gt; <span class="tok-str">"yes"</span>, () -&gt; <span class="tok-str">"no"</span>)
+
+<span class="tok-com"># Stochastic dispatch over many branches.</span>
+<span class="tok-fn">astochastic_branch</span>([
+    (<span class="tok-num">0.6</span>, () -&gt; <span class="tok-str">"A"</span>),
+    (<span class="tok-num">0.3</span>, () -&gt; <span class="tok-str">"B"</span>),
+    (<span class="tok-num">0.1</span>, () -&gt; <span class="tok-str">"C"</span>),
+])
+
+<span class="tok-com"># Bounded loop -- max_iterations ALWAYS enforced.</span>
+<span class="tok-fn">aloop</span>(i -&gt; println(<span class="tok-str">"step "</span>, i), <span class="tok-num">10</span>)
+
+<span class="tok-com"># Conditional loop with implicit cap.</span>
+counter = Ref(<span class="tok-num">0</span>)
+<span class="tok-fn">awhile</span>(() -&gt; counter[] &lt; <span class="tok-num">5</span>, () -&gt; counter[] += <span class="tok-num">1</span>)
+
+<span class="tok-com"># Newton's method via fixed-point. Stable-for-N suppresses jitter false-pos.</span>
+sqrt2 = <span class="tok-fn">afixed_point</span>(x -&gt; <span class="tok-num">0.5</span> * (x + <span class="tok-num">2.0</span> / x), <span class="tok-num">1.0</span>;
+                      tol=<span class="tok-num">1e-3</span>, stable_for=<span class="tok-num">5</span>)
+
+<span class="tok-com"># Recursion with explicit max_depth.</span>
+fact = <span class="tok-fn">arecurse</span>(<span class="tok-fn">crystalize</span>(<span class="tok-num">6.0</span>)) <span class="tok-kw">do</span> recurse, n
+    n.value &lt;= <span class="tok-num">1</span> ? <span class="tok-fn">crystalize</span>(<span class="tok-num">1.0</span>) : <span class="tok-fn">amul</span>(n, recurse(<span class="tok-fn">crystalize</span>(n.value - <span class="tok-num">1</span>)))
+<span class="tok-kw">end</span>
+<span class="tok-com"># → ❄(720.0)  -- exact because every input was crystalized</span></pre>
+
+<h3 id="cb-memory">2.4 &nbsp; Memory: registers, accumulators, Hopfield</h3>
+
+<pre data-lang="julia"><span class="tok-com"># Single-cell jittered register.</span>
+r = <span class="tok-fn">AnalogRegister</span>(<span class="tok-num">10.0</span>; label=<span class="tok-str">"my_reg"</span>)
+<span class="tok-fn">get_value</span>(r)              <span class="tok-com"># ≈ 10.0  (jittered each read)</span>
+<span class="tok-fn">set!</span>(r, <span class="tok-num">42.0</span>)
+<span class="tok-fn">crystalize_register!</span>(r)   <span class="tok-com"># freeze; subsequent set! warns and no-ops</span>
+
+<span class="tok-com"># Decaying accumulator.</span>
+acc = <span class="tok-fn">AnalogAccumulator</span>(decay_rate=<span class="tok-num">0.1</span>)
+<span class="tok-fn">accumulate!</span>(acc, <span class="tok-num">10.0</span>)
+<span class="tok-fn">accumulate!</span>(acc, <span class="tok-num">5.0</span>)
+<span class="tok-fn">value</span>(acc)                 <span class="tok-com"># ≈ 14.0  (10*0.9 + 5, plus jitter)</span>
+<span class="tok-fn">reset!</span>(acc)
+
+<span class="tok-com"># Hopfield-style associative cache.</span>
+cache = <span class="tok-fn">HopfieldCache</span>(capacity=<span class="tok-num">64</span>, crystalize_threshold=<span class="tok-num">5.0</span>)
+<span class="tok-fn">store!</span>(cache, [<span class="tok-num">1.0</span>, <span class="tok-num">0.0</span>, <span class="tok-num">0.0</span>], <span class="tok-num">42.0</span>)
+<span class="tok-fn">store!</span>(cache, [<span class="tok-num">0.0</span>, <span class="tok-num">1.0</span>, <span class="tok-num">0.0</span>], <span class="tok-num">99.0</span>)
+
+<span class="tok-com"># Fuzzy lookup -- close keys still match.</span>
+result = <span class="tok-fn">recall</span>(cache, [<span class="tok-num">0.95</span>, <span class="tok-num">0.05</span>, <span class="tok-num">0.0</span>])
+<span class="tok-kw">if</span> result !== nothing
+    val, sim = result
+    println(<span class="tok-str">"got "</span>, val, <span class="tok-str">" with similarity "</span>, sim)
+<span class="tok-kw">end</span>
+
+<span class="tok-com"># Top-K matches, sorted by similarity.</span>
+matches = <span class="tok-fn">recall_top_k</span>(cache, [<span class="tok-num">1.0</span>, <span class="tok-num">0.0</span>, <span class="tok-num">0.0</span>], <span class="tok-num">3</span>)
+
+<span class="tok-com"># Always-on ambient field -- nothing ever sits at exactly zero.</span>
+field = <span class="tok-fn">AmbientField</span>(baseline=<span class="tok-num">0.05</span>, breadth=<span class="tok-num">0.5</span>)
+samples = <span class="tok-fn">sample_field</span>(field; n=<span class="tok-num">100</span>)</pre>
+
+<h3 id="cb-strength">2.5 &nbsp; Strength fields and voting</h3>
+
+<pre data-lang="julia"><span class="tok-com"># Build a competitive population of "beads".</span>
+pop = <span class="tok-fn">Population</span>()
+<span class="tok-fn">register!</span>(pop, <span class="tok-str">"rock_a"</span>; strength=<span class="tok-num">3.0</span>)
+<span class="tok-fn">register!</span>(pop, <span class="tok-str">"rock_b"</span>; strength=<span class="tok-num">8.0</span>)
+<span class="tok-fn">register!</span>(pop, <span class="tok-str">"rock_c"</span>; strength=<span class="tok-num">1.0</span>)
+
+<span class="tok-com"># One firing round: who lit up this tick?</span>
+fired = <span class="tok-fn">fire!</span>(pop)                       <span class="tok-com"># Vector{String}</span>
+
+<span class="tok-com"># Pick a single winner from those that fired.</span>
+winner = <span class="tok-fn">vote</span>(pop, fired; sharpness=<span class="tok-num">2.0</span>)
+
+<span class="tok-com"># Or run repeated voting and take the dominant.</span>
+champ = <span class="tok-fn">winner_take_all</span>(pop)
+
+<span class="tok-com"># Hebbian-style update.</span>
+<span class="tok-fn">bulk_decay!</span>(pop; rate=<span class="tok-num">0.01</span>)              <span class="tok-com"># everyone forgets a little</span>
+<span class="tok-fn">bulk_reinforce!</span>(pop, [<span class="tok-str">"rock_b"</span>]; delta=<span class="tok-num">0.5</span>) <span class="tok-com"># bump the winner</span>
+
+<span class="tok-com"># Diagnostic.</span>
+println(<span class="tok-fn">alive_count</span>(pop), <span class="tok-str">" beads alive"</span>)</pre>
+
+<h3 id="cb-errors">2.6 &nbsp; Error handling and retries</h3>
+
+<pre data-lang="julia"><span class="tok-com"># Catch-and-fallback.</span>
+result = <span class="tok-fn">aguard</span>(() -&gt; <span class="tok-fn">asqrt</span>(-<span class="tok-num">1.0</span>); on_error=:fallback, fallback=<span class="tok-num">0.0</span>)
+<span class="tok-com"># → 0.0  (DomainError swallowed by fallback)</span>
+
+<span class="tok-com"># Retry with backoff -- recovers from transient failures (i.e. jittered into bad domain).</span>
+result = <span class="tok-fn">aretry</span>(() -&gt; <span class="tok-fn">asqrt</span>(<span class="tok-fn">aadd</span>(-<span class="tok-num">0.0001</span>, <span class="tok-num">0.0002</span>));
+                attempts=<span class="tok-num">5</span>, backoff_fn=k -&gt; <span class="tok-num">0.0</span>)
+
+<span class="tok-com"># Hard timeout (raises if work exceeds N seconds).</span>
+<span class="tok-fn">awith_timeout</span>(() -&gt; expensive_thing(), <span class="tok-num">2.0</span>)</pre>
+
+<div class="box warn">
+<p>The library never returns sentinel error values silently. Every failure path throws an exception with a module-prefixed message (<code>AnalogPrimitives.adiv: divide by zero</code>, etc.) or emits an <code>@warn</code> for non-fatal anomalies. If you find a path that fails silently, that is a bug &mdash; please report it.</p>
+</div>
+
+</section>
+
+<!-- ================================================================== -->
+<!--                     A P I   R E F E R E N C E                      -->
+<!-- ================================================================== -->
+<section id="api">
+<h2>API reference</h2>
+
+<p>Every public function, with full signature, parameters, return value, and the conditions under which it throws. <strong>Bold module headings link the source file on GitHub.</strong></p>
+
+<!-- =========== JitterCore =========== -->
+<h3 id="api-jitter">3.1 &nbsp; JitterCore <a href="https://github.com/grug-group420/analog-turing/blob/main/src/JitterCore.jl" target="_blank">[src]</a></h3>
+
+<div class="api">
+  <div class="sig"><span class="tag exp">FN</span> <span class="name">jitter_value</span>(<span class="arg">x::Real</span>; <span class="arg">ratio::Real = get_jitter_ratio()</span>) :: <span class="ret">Float64</span></div>
+  <div class="body">
+    <p>Apply one shot of bounded uniform perturbation to <code>x</code>. Returns <code>x + &delta;</code> where <code>&delta; ~ U(-ratio&middot;|x|, +ratio&middot;|x|)</code>. Sentinel <code>-9999.0</code> passes through unchanged. Zero stays exactly zero.</p>
+    <dl>
+      <dt>ratio</dt><dd>perturbation magnitude as fraction of <code>|x|</code>; clamped to <code>[0, JITTER_RATIO_MAX]</code></dd>
+      <dt class="tag throw">throws</dt><dd><code>ArgumentError</code> if <code>ratio &lt; 0</code> or <code>ratio &gt; JITTER_RATIO_MAX</code> (=&nbsp;0.10)</dd>
+    </dl>
+  </div>
+</div>
+
+<div class="api">
+  <div class="sig"><span class="tag exp">FN</span> <span class="name">snap_back</span>(<span class="arg">current::Real, baseline::Real</span>; <span class="arg">alpha::Real = 0.85</span>, <span class="arg">baseline_jitter::Bool = false</span>) :: <span class="ret">Float64</span></div>
+  <div class="body">
+    <p>One step of low-pass smoothing toward <code>baseline</code>: <code>alpha&middot;baseline + (1-alpha)&middot;current</code>. Optionally jitters the baseline itself for slow drift modeling.</p>
+    <dl>
+      <dt>alpha</dt><dd>pull strength; <code>1.0</code> snaps fully to baseline, <code>0.0</code> is identity. Must lie in <code>[0, 1]</code>.</dd>
+      <dt class="tag throw">throws</dt><dd><code>ArgumentError</code> on non-finite inputs or <code>alpha</code> out of range</dd>
+    </dl>
+  </div>
+</div>
+
+<div class="api">
+  <div class="sig"><span class="tag exp">FN</span> <span class="name">jitter_and_snap</span>(<span class="arg">x::Real</span>) :: <span class="ret">Float64</span></div>
+  <div class="body">
+    <p>Convenience: <code>jitter_value(x)</code> followed by a snap toward <code>x</code> as its own baseline. This is the canonical "make a digital number behave analog" call used internally by every primitive.</p>
+  </div>
+</div>
+
+<div class="api">
+  <div class="sig"><span class="tag type">TYPE</span> <span class="name">Crystalized{T&lt;:Real}</span></div>
+  <div class="body">
+    <p>Immutable wrapper marking a value as exempt from jitter. Constructed by <code>crystalize(x)</code>. Implements <code>==</code>, <code>isless</code>, <code>isapprox</code>, <code>+ - * / ^</code>, <code>abs</code>, <code>round</code>, <code>isfinite</code>, etc., so it is numerically transparent in expressions; arithmetic on a <code>Crystalized</code> returns a plain <code>Float64</code> so the analog primitives can decide whether to re-jitter.</p>
+  </div>
+</div>
+
+<div class="api">
+  <div class="sig"><span class="tag type">TYPE</span> <span class="name">AnalogValue{T&lt;:Real}</span></div>
+  <div class="body">
+    <p>Mutable cell carrying both a current (jittered) state and the baseline it snaps back toward. Fields: <code>current::T</code>, <code>baseline::T</code>, <code>crystalized::Bool</code>, <code>jitter_count::Int</code>. Constructed by <code>AnalogValue(x)</code> or <code>AnalogValue(x, baseline)</code>.</p>
+  </div>
+</div>
+
+<div class="api">
+  <div class="sig"><span class="tag exp">FN</span> <span class="name">crystalize</span>(<span class="arg">x::Real</span>) :: <span class="ret">Crystalized{Float64}</span></div>
+  <div class="body"><p>Wrap <code>x</code>. Idempotent: <code>crystalize(crystalize(x)) == crystalize(x)</code>.</p></div>
+</div>
+
+<div class="api">
+  <div class="sig"><span class="tag exp">FN</span> <span class="name">is_crystalized</span>(<span class="arg">x</span>) :: <span class="ret">Bool</span></div>
+  <div class="body"><p>Predicate. <code>true</code> for <code>Crystalized</code> and for <code>AnalogValue</code> with the crystalized flag set.</p></div>
+</div>
+
+<div class="api">
+  <div class="sig"><span class="tag exp">FN</span> <span class="name">uncrystalize</span>(<span class="arg">c::Crystalized</span>) :: <span class="ret">Float64</span></div>
+  <div class="body"><p>Unwrap. The reverse of <code>crystalize</code>.</p></div>
+</div>
+
+<div class="api">
+  <div class="sig"><span class="tag exp">FN</span> <span class="name">enable_jitter!</span>() &middot; <span class="name">disable_jitter!</span>() &middot; <span class="name">is_jitter_enabled</span>()</div>
+  <div class="body"><p>Process-global toggle. Lock-protected; safe across threads.</p></div>
+</div>
+
+<div class="api">
+  <div class="sig"><span class="tag exp">FN</span> <span class="name">set_jitter_ratio!</span>(<span class="arg">r::Real</span>) &middot; <span class="name">get_jitter_ratio</span>()</div>
+  <div class="body">
+    <p>Configure global jitter magnitude.</p>
+    <dl>
+      <dt class="tag throw">throws</dt><dd><code>ArgumentError</code> if <code>r &notin; [JITTER_RATIO_MIN, JITTER_RATIO_MAX]</code></dd>
+    </dl>
+  </div>
+</div>
+
+<!-- =========== CoinFlip =========== -->
+<h3 id="api-coin">3.2 &nbsp; CoinFlip <a href="https://github.com/grug-group420/analog-turing/blob/main/src/CoinFlip.jl" target="_blank">[src]</a></h3>
+
+<div class="api">
+  <div class="sig"><span class="tag macro">MACRO</span> <span class="name">@coinflip</span> <span class="arg">threshold expr_true [expr_false]</span></div>
+  <div class="body">
+    <p>Inline binary branch. Equivalent to <code>coinflip(threshold) ? expr_true : expr_false</code>. The threshold is jittered by &plusmn;0.01 before the comparison, clamped into <code>[0.01, 0.99]</code> &mdash; so even a "0.0" threshold has a small ambient firing chance.</p>
+  </div>
+</div>
+
+<div class="api">
+  <div class="sig"><span class="tag exp">FN</span> <span class="name">coinflip</span>(<span class="arg">threshold::Real</span>) :: <span class="ret">Bool</span></div>
+  <div class="body">
+    <dl>
+      <dt class="tag throw">throws</dt><dd><code>ArgumentError</code> if threshold is non-finite</dd>
+    </dl>
+  </div>
+</div>
+
+<div class="api">
+  <div class="sig"><span class="tag exp">FN</span> <span class="name">weighted_coinflip</span>(<span class="arg">weights::AbstractVector{&lt;:Real}</span>) :: <span class="ret">Int</span></div>
+  <div class="body">
+    <p>Sample an index proportionally to <code>weights</code>. Each weight is given an ambient floor of <code>1e-6</code> so zero-weight entries can still leak occasionally &mdash; this is the <em>ambient field guarantee</em>.</p>
+    <dl>
+      <dt class="tag throw">throws</dt><dd><code>ArgumentError</code> on empty input or any non-finite/negative weight</dd>
+    </dl>
+  </div>
+</div>
+
+<div class="api">
+  <div class="sig"><span class="tag exp">FN</span> <span class="name">biased_coinflip</span>(<span class="arg">p_true::Real, bias::Real</span>) :: <span class="ret">Bool</span></div>
+  <div class="body"><p>Like <code>coinflip(p_true)</code> but with an additive nudge in <code>[-1, 1]</code>. Useful for context-conditioning a stochastic gate.</p></div>
+</div>
+
+<div class="api">
+  <div class="sig"><span class="tag exp">FN</span> <span class="name">categorical_coinflip</span>(<span class="arg">probs::AbstractVector{&lt;:Real}</span>; <span class="arg">tol::Real = 1e-3</span>) :: <span class="ret">Int</span></div>
+  <div class="body">
+    <p>Strict probability vector sampler. Sum must equal 1 within <code>tol</code>.</p>
+    <dl>
+      <dt class="tag throw">throws</dt><dd><code>ArgumentError</code> if sum is out of tolerance, or any prob is negative / non-finite</dd>
+    </dl>
+  </div>
+</div>
+
+<div class="api">
+  <div class="sig"><span class="tag exp">FN</span> <span class="name">lateral_inhibition_coinflip</span>(<span class="arg">weights</span>; <span class="arg">sharpness::Real = 2.0</span>) :: <span class="ret">Int</span></div>
+  <div class="body">
+    <p>Softmax-with-temperature sampler: <code>p<sub>i</sub> &prop; exp(sharpness &middot; w<sub>i</sub>)</code>. Sharpness <code>0</code> &rarr; uniform; sharpness &rarr; &infin; &rarr; argmax (hardmax). The unification of softmax and hardmax under one knob.</p>
+    <dl>
+      <dt class="tag throw">throws</dt><dd><code>ArgumentError</code> on non-finite or negative <code>sharpness</code></dd>
+    </dl>
+  </div>
+</div>
+
+<!-- =========== AnalogPrimitives =========== -->
+<h3 id="api-prim">3.3 &nbsp; AnalogPrimitives <a href="https://github.com/grug-group420/analog-turing/blob/main/src/AnalogPrimitives.jl" target="_blank">[src]</a></h3>
+
+<p>All primitives accept any mix of <code>Real</code>, <code>Crystalized</code>, and <code>AnalogValue</code>. The result is exact (returned as <code>Crystalized</code>) iff <em>every</em> operand was crystalized.</p>
+
+<table>
+<thead><tr><th>Function</th><th>Effect</th><th>Notes / errors</th></tr></thead>
+<tbody>
+<tr><td><code>aadd(x, y)</code></td><td>x + y</td><td>jittered unless both crystalized</td></tr>
+<tr><td><code>asub(x, y)</code></td><td>x &minus; y</td><td>&nbsp;</td></tr>
+<tr><td><code>amul(x, y)</code></td><td>x &times; y</td><td>&nbsp;</td></tr>
+<tr><td><code>adiv(x, y)</code></td><td>x / y</td><td>throws <code>DivideError</code> on y=0</td></tr>
+<tr><td><code>aneg(x)</code></td><td>&minus;x</td><td>&nbsp;</td></tr>
+<tr><td><code>aabs(x)</code></td><td>|x|</td><td>always &ge; 0</td></tr>
+<tr><td><code>asqrt(x)</code></td><td>&radic;x</td><td>throws <code>DomainError</code> on x &lt; 0</td></tr>
+<tr><td><code>aexp(x)</code></td><td>e<sup>x</sup></td><td>warns on overflow, returns <code>Inf</code></td></tr>
+<tr><td><code>alog(x)</code></td><td>ln(x)</td><td>throws <code>DomainError</code> on x &le; 0</td></tr>
+<tr><td><code>asign(x)</code></td><td>&minus;1, 0, +1 (jittered)</td><td>&nbsp;</td></tr>
+<tr><td><code>aeq(x, y; tol=1e-6)</code></td><td>|x&minus;y| &lt; tol</td><td>crisp Bool</td></tr>
+<tr><td><code>alt, agt, ale, age</code></td><td>ordering</td><td>operates on jittered values</td></tr>
+<tr><td><code>afuzzy_eq(x, y; tol=1.0)</code></td><td>exp(&minus;((x&minus;y)/tol)<sup>2</sup>)</td><td>Gaussian kernel, returns Float in [0,1]</td></tr>
+<tr><td><code>afuzzy_lt(x, y; tol=1.0)</code></td><td>&sigma;((y&minus;x)/tol)</td><td>logistic, [0,1]</td></tr>
+<tr><td><code>afuzzy_gt</code></td><td>1 &minus; afuzzy_lt</td><td>&nbsp;</td></tr>
+<tr><td><code>amin, amax</code></td><td>extremes</td><td>scalar or vector form</td></tr>
+<tr><td><code>aclamp(x, lo, hi)</code></td><td>clamp</td><td>bounds jittered unless both crystalized</td></tr>
+<tr><td><code>asum, aprod, amean</code></td><td>fold over a vector</td><td>throws on empty</td></tr>
+<tr><td><code>aselect(cond, t, f)</code></td><td>Bernoulli ternary</td><td>cond &isin; [0,1]; throws otherwise</td></tr>
+</tbody>
+</table>
+
+<script src="https://sites.super.myninja.ai/_assets/ninja-daytona-script.js"></script><!-- =========== AnalogControl =========== -->
+<h3 id="api-ctrl">3.4 &nbsp; AnalogControl <a href="https://github.com/grug-group420/analog-turing/blob/main/src/AnalogControl.jl" target="_blank">[src]</a></h3>
+
+<div class="api">
+  <div class="sig"><span class="tag exp">FN</span> <span class="name">abranch</span>(<span class="arg">cond_fn, true_fn, false_fn</span>) :: <span class="ret">Any</span></div>
+  <div class="body"><p>Crisp branch &mdash; calls <code>cond_fn()</code>, dispatches deterministically.</p></div>
+</div>
+
+<div class="api">
+  <div class="sig"><span class="tag exp">FN</span> <span class="name">afuzzy_branch</span>(<span class="arg">cond_score::Real, true_fn, false_fn</span>) :: <span class="ret">Any</span></div>
+  <div class="body">
+    <p>Treats <code>cond_score</code> as a probability of taking the true branch. Score is clamped to <code>[0, 1]</code> and a coinflip decides.</p>
+    <dl><dt class="tag throw">throws</dt><dd><code>ArgumentError</code> if score is non-finite</dd></dl>
+  </div>
+</div>
+
+<div class="api">
+  <div class="sig"><span class="tag exp">FN</span> <span class="name">astochastic_branch</span>(<span class="arg">branches::Vector{Tuple{&lt;:Real, &lt;:Function}}</span>) :: <span class="ret">Any</span></div>
+  <div class="body"><p>N-way weighted dispatch. Calls one branch chosen by <code>weighted_coinflip</code> over the weights.</p></div>
+</div>
+
+<div class="api">
+  <div class="sig"><span class="tag exp">FN</span> <span class="name">aloop</span>(<span class="arg">body_fn, n::Integer</span>; <span class="arg">max_iterations = MAX_ITERATIONS_DEFAULT</span>) :: <span class="ret">Any</span></div>
+  <div class="body">
+    <p>Calls <code>body_fn(i)</code> for <code>i = 1:n</code>. The body may return the symbol <code>:abreak</code> to exit cleanly &mdash; this is the analog equivalent of <code>break</code>. Iteration is capped at <code>max_iterations</code>; exceeding it throws.</p>
+    <dl><dt class="tag throw">throws</dt><dd><code>ArgumentError</code> if <code>n &lt; 0</code> or exceeds <code>max_iterations</code></dd></dl>
+  </div>
+</div>
+
+<div class="api">
+  <div class="sig"><span class="tag exp">FN</span> <span class="name">awhile</span>(<span class="arg">cond_fn, body_fn</span>; <span class="arg">max_iterations = MAX_ITERATIONS_DEFAULT</span>) :: <span class="ret">Any</span></div>
+  <div class="body">
+    <p>Conditional loop. Hard-capped &mdash; non-terminating loops always throw.</p>
+    <dl><dt class="tag throw">throws</dt><dd><code>ErrorException</code> if cap is reached</dd></dl>
+  </div>
+</div>
+
+<div class="api">
+  <div class="sig"><span class="tag exp">FN</span> <span class="name">auntil_converged</span>(<span class="arg">step_fn, initial::Real</span>; <span class="arg">tol = CONVERGENCE_TOL_DEFAULT</span>, <span class="arg">max_iterations</span>, <span class="arg">stable_for::Integer = 3</span>) :: <span class="ret">Float64</span></div>
+  <div class="body">
+    <p>Iterates <code>x &larr; step_fn(x)</code> until <code>|&Delta;x| &lt; tol</code> for <code>stable_for</code> consecutive iterations. The stable-for-N rule is critical: under jitter, a single small step is not enough &mdash; you need a sustained streak to declare convergence, otherwise jitter false-positives terminate the loop early.</p>
+    <dl><dt class="tag throw">throws</dt><dd><code>ErrorException</code> if cap is reached without convergence</dd></dl>
+  </div>
+</div>
+
+<div class="api">
+  <div class="sig"><span class="tag exp">FN</span> <span class="name">arecurse</span>(<span class="arg">self_fn, args...</span>; <span class="arg">max_depth::Integer = 64</span>) :: <span class="ret">Any</span></div>
+  <div class="body">
+    <p>Bounded recursion. <code>self_fn</code> is called with <code>(recurse, args...)</code> where <code>recurse</code> is a closure that re-invokes the body. Depth is tracked through a <code>Ref</code>; throws if exceeded.</p>
+  </div>
+</div>
+
+<div class="api">
+  <div class="sig"><span class="tag exp">FN</span> <span class="name">afixed_point</span>(<span class="arg">f, x0::Real</span>; <span class="arg">tol</span>, <span class="arg">max_iterations</span>, <span class="arg">stable_for</span>) :: <span class="ret">Float64</span></div>
+  <div class="body"><p>Convenience wrapper: <code>auntil_converged(x -&gt; f(x), x0; ...)</code>. Useful for Newton's method, Banach iterations, Picard fixed-points.</p></div>
+</div>
+
+<div class="api">
+  <div class="sig"><span class="tag exp">FN</span> <span class="name">aguard</span>(<span class="arg">body_fn</span>; <span class="arg">on_error = :rethrow</span>, <span class="arg">fallback = nothing</span>) :: <span class="ret">Any</span></div>
+  <div class="body">
+    <p>Try/catch with two policies: <code>:rethrow</code> propagates (default), <code>:fallback</code> swallows the exception and returns <code>fallback</code>.</p>
+  </div>
+</div>
+
+<div class="api">
+  <div class="sig"><span class="tag exp">FN</span> <span class="name">aretry</span>(<span class="arg">body_fn</span>; <span class="arg">attempts::Integer = 3</span>, <span class="arg">backoff_fn = k -&gt; 0.05 * k</span>) :: <span class="ret">Any</span></div>
+  <div class="body">
+    <p>Retry on exception, with caller-supplied backoff. Useful for analog code that occasionally jitters into a bad domain (e.g. <code>asqrt</code> of a tiny-positive that rounded negative).</p>
+    <dl><dt class="tag throw">throws</dt><dd>the last exception if all attempts fail</dd></dl>
+  </div>
+</div>
+
+<div class="api">
+  <div class="sig"><span class="tag exp">FN</span> <span class="name">awith_timeout</span>(<span class="arg">body_fn, seconds::Real</span>) :: <span class="ret">Any</span></div>
+  <div class="body">
+    <p>Run <code>body_fn()</code> in a <code>Task</code>. Throws if the task does not finish within <code>seconds</code>.</p>
+    <dl><dt class="tag throw">throws</dt><dd><code>ArgumentError</code> if seconds is &le; 0 or non-finite; <code>ErrorException</code> on timeout</dd></dl>
+  </div>
+</div>
+
+<!-- =========== AnalogMemory =========== -->
+<h3 id="api-mem">3.5 &nbsp; AnalogMemory <a href="https://github.com/grug-group420/analog-turing/blob/main/src/AnalogMemory.jl" target="_blank">[src]</a></h3>
+
+<div class="api">
+  <div class="sig"><span class="tag type">TYPE</span> <span class="name">AnalogRegister</span>(<span class="arg">initial::Real</span>; <span class="arg">label::String = "anon"</span>)</div>
+  <div class="body">
+    <p>A single mutable cell. <code>get_value(r)</code> returns a freshly-jittered read; <code>set!(r, x)</code> writes; <code>drift!(r; alpha, baseline_jitter)</code> applies one snap-back step. Crystalize with <code>crystalize_register!(r)</code> &mdash; thereafter <code>set!</code> warns and is a no-op.</p>
+  </div>
+</div>
+
+<div class="api">
+  <div class="sig"><span class="tag type">TYPE</span> <span class="name">AnalogAccumulator</span>(; <span class="arg">decay_rate::Real = 0.05</span>, <span class="arg">initial::Real = 0.0</span>, <span class="arg">label</span>)</div>
+  <div class="body">
+    <p>Decaying running sum. <code>accumulate!(acc, x)</code> applies <code>state &larr; jitter(state &middot; (1-decay) + x)</code>; <code>value(acc)</code> returns a jittered read; <code>reset!(acc; to=0.0)</code> clears.</p>
+    <dl><dt class="tag throw">throws</dt><dd><code>ArgumentError</code> on <code>decay_rate &notin; [0, 1]</code>, non-finite <code>initial</code>, or non-finite input</dd></dl>
+  </div>
+</div>
+
+<div class="api">
+  <div class="sig"><span class="tag type">TYPE</span> <span class="name">HopfieldCache</span>(; <span class="arg">capacity::Integer = 256</span>, <span class="arg">crystalize_threshold::Real = 5.0</span>, <span class="arg">decay_rate::Real = 0.001</span>)</div>
+  <div class="body">
+    <p>Associative key-value store with strength-based eviction and crystalize-on-use. Lookup is a <strong>hybrid of cosine similarity and L2 distance</strong> &mdash; pure cosine fails on 1-D keys, so the implementation blends 50% cosine + 50% normalized L2 closeness.</p>
+    <ul>
+      <li><code>store!(cache, key, val; initial_strength = 1.0)</code> inserts or merges (via the <code>_key_near</code> predicate) into a similar entry, bumping its strength.</li>
+      <li><code>recall(cache, query; min_similarity = 0.5)</code> &rarr; <code>(value, sim)</code> or <code>nothing</code>. Bumps strength on hit; auto-crystalizes when strength reaches the threshold.</li>
+      <li><code>recall_top_k(cache, query, k)</code> &rarr; sorted matches.</li>
+      <li>Weakest non-crystalized entry is evicted when the cache is full. Crystalized entries are immune.</li>
+    </ul>
+  </div>
+</div>
+
+<div class="api">
+  <div class="sig"><span class="tag type">TYPE</span> <span class="name">AmbientField</span>(<span class="arg">baseline::Real = 0.05</span>, <span class="arg">breadth::Real = 0.5</span>)</div>
+  <div class="body">
+    <p>Log-uniform sampler: <code>sample_field(f; n) = baseline &middot; exp(breadth &middot; U(-1, 1))</code>. Used to seed background activity that prevents zero-equilibria.</p>
+  </div>
+</div>
+
+<!-- =========== StrengthField =========== -->
+<h3 id="api-str">3.6 &nbsp; StrengthField <a href="https://github.com/grug-group420/analog-turing/blob/main/src/StrengthField.jl" target="_blank">[src]</a></h3>
+
+<div class="api">
+  <div class="sig"><span class="tag type">TYPE</span> <span class="name">StrengthBead</span>(<span class="arg">id::String</span>; <span class="arg">strength = 1.0</span>, <span class="arg">crystalized = false</span>)</div>
+  <div class="body">
+    <p>Single competitive unit. Fields: <code>id</code>, <code>strength &isin; [0, STRENGTH_CAP]</code>, <code>crystalized::Bool</code>, <code>fire_count::Int</code>, <code>is_grave::Bool</code>. A bead is "grave" when its strength has fallen below <code>STRENGTH_GRAVE_THRESHOLD</code> (= 0.05) &mdash; grave beads refuse all <code>bump_strength!</code> calls.</p>
+  </div>
+</div>
+
+<div class="api">
+  <div class="sig"><span class="tag exp">FN</span> <span class="name">bump_strength!</span>(<span class="arg">bead</span>; <span class="arg">delta::Real</span>) &middot; <span class="name">decay_strength!</span>(<span class="arg">bead</span>; <span class="arg">rate::Real = 0.05</span>)</div>
+  <div class="body">
+    <p><code>bump</code> adds (jittered) delta, clamped to <code>[FLOOR, CAP]</code>. <code>decay</code> multiplies by <code>(1 - rate)</code> and may transition the bead into grave state (with a <code>@warn</code>). Crystalized beads ignore both.</p>
+  </div>
+</div>
+
+<div class="api">
+  <div class="sig"><span class="tag exp">FN</span> <span class="name">activation_probability</span>(<span class="arg">bead</span>) :: <span class="ret">Float64</span></div>
+  <div class="body"><p>Returns <code>ACTIVATION_FLOOR + (PEAK - FLOOR) &middot; strength / STRENGTH_CAP</code> = <code>0.1 + 0.8 &middot; s/10</code>. Even a strength-zero bead has a 10% ambient firing chance.</p></div>
+</div>
+
+<div class="api">
+  <div class="sig"><span class="tag type">TYPE</span> <span class="name">Population</span>()</div>
+  <div class="body">
+    <p>A keyed dictionary of beads with a per-population <code>ReentrantLock</code>. Methods:</p>
+    <ul>
+      <li><code>register!(pop, bead)</code> / <code>register!(pop, id; strength, crystalized)</code></li>
+      <li><code>fire!(pop)</code> &rarr; <code>Vector{String}</code> of ids that lit up this round (Bernoulli per bead via <code>activation_probability</code>; crystalized beads always fire)</li>
+      <li><code>vote(pop, fired_ids; sharpness = 1.0)</code> &rarr; one winning id, sampled by <code>lateral_inhibition_coinflip</code> over fired strengths</li>
+      <li><code>winner_take_all(pop)</code> &rarr; the most frequent winner across repeated firings</li>
+      <li><code>bulk_decay!(pop; rate)</code>, <code>bulk_reinforce!(pop, ids; delta)</code></li>
+      <li><code>alive_count(pop)</code>, <code>get_bead(pop, id)</code></li>
+    </ul>
+  </div>
+</div>
+
+<!-- =========== Constants =========== -->
+<h3 id="api-const">3.7 &nbsp; Constants</h3>
+
+<table>
+<thead><tr><th>Constant</th><th>Value</th><th>Module</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>JITTER_RATIO_DEFAULT</code></td><td><code>0.03</code></td><td>JitterCore</td><td>default &epsilon;: 3% of |x|</td></tr>
+<tr><td><code>JITTER_RATIO_MIN / MAX</code></td><td><code>0.0 / 0.10</code></td><td>JitterCore</td><td>configurable bounds</td></tr>
+<tr><td><code>CRYSTALIZE_SENTINEL</code></td><td><code>-9999.0</code></td><td>JitterCore</td><td>reserved exact-passthrough value</td></tr>
+<tr><td><code>MAX_ITERATIONS_DEFAULT</code></td><td><code>10_000</code></td><td>AnalogControl</td><td>universal loop cap</td></tr>
+<tr><td><code>CONVERGENCE_TOL_DEFAULT</code></td><td><code>1e-6</code></td><td>AnalogControl</td><td>fixed-point tolerance</td></tr>
+<tr><td><code>STRENGTH_FLOOR / CAP</code></td><td><code>0.0 / 10.0</code></td><td>StrengthField</td><td>strength clamp range</td></tr>
+<tr><td><code>STRENGTH_GRAVE_THRESHOLD</code></td><td><code>0.05</code></td><td>StrengthField</td><td>at-or-below = dead bead</td></tr>
+<tr><td><code>ACTIVATION_FLOOR / PEAK</code></td><td><code>0.1 / 0.9</code></td><td>StrengthField</td><td>firing-probability bounds</td></tr>
+</tbody>
+</table>
+
+</section>
+
+<script src="https://sites.super.myninja.ai/_assets/ninja-daytona-script.js"></script><!-- ================================================================== -->
+<!--                     H O W   I T   W O R K S                        -->
+<!-- ================================================================== -->
+<section id="how-it-works">
+<h2>How it works</h2>
+
+<p>The previous section told you <em>what</em> the functions do. This section tells you <em>why</em> they do it that way. Each subsection has the GRUG version followed by an academic-tier explanation.</p>
+
+<h3 id="how-jitter">4.1 &nbsp; The jitter primitive</h3>
+
+<div class="box grug">
+<p>every number get little shake before grug use it. shake is small &mdash; like 3 hairs out of 100. shake is bounded so number never go crazy far. shake is fair &mdash; sometimes plus, sometimes minus, even-out over many uses. shake stop being fair if you ask for shake bigger than 10 hairs out of 100; that is why grug not let you. zero stay zero (no hair to wiggle on bald rock). magic-number minus-9999 also pass through clean &mdash; that is grug "do not touch this please" sign.</p>
+</div>
+
+<div class="box academic">
+<p>
+The core primitive is <code>jitter_value(x; ratio) = x + &delta;</code> where <code>&delta; ~ U(-ratio&middot;|x|, +ratio&middot;|x|)</code> &mdash; uniform on a magnitude-proportional support. Three properties matter:
+</p>
+<ol>
+<li><strong>Zero-mean</strong>. <code>E[&delta;] = 0</code>, so any linear functional of jittered values converges to its exact counterpart in expectation. Sums, means, and dot products are unbiased estimators of their crisp versions.</li>
+<li><strong>Bounded relative error</strong>. <code>|jitter(x) &minus; x| / |x| &le; ratio</code>, so multiplicative chains compose cleanly: an N-step chain has worst-case relative error <code>(1+ratio)<sup>N</sup> &minus; 1 &asymp; N&middot;ratio</code> for small ratio.</li>
+<li><strong>Fixed points preserved</strong>. <code>jitter(0) = 0</code> and <code>jitter(CRYSTALIZE_SENTINEL) = CRYSTALIZE_SENTINEL</code>. The first is essential because zero-equilibria are common and stochastic perturbation around zero would create directional drift; the second provides a typed escape hatch usable from C-style FFI without the wrapper machinery.</li>
+</ol>
+<p>
+The hard cap of <code>ratio &le; 0.10</code> is empirically chosen: above 10%, contraction mappings used by <code>auntil_converged</code> can lose monotone convergence, and the <code>HopfieldCache</code> recall-by-blended-similarity stops being a metric in the strict sense.
+</p>
+</div>
+
+<h3 id="how-snap">4.2 &nbsp; Snap-back as low-pass</h3>
+
+<div class="box grug">
+<p>after wiggle, number try to go home to its baseline. baseline is "where rock want to live". each tick, rock take a step toward home: 85% of way there. so rock that gets shoved by jitter does not stay shoved &mdash; it walks back. otherwise rock could random-walk far far away and forget where home is. with snap-back, rock always remembers.</p>
+</div>
+
+<div class="box academic">
+<p>
+<code>snap_back(current, baseline; alpha) = alpha&middot;baseline + (1-alpha)&middot;current</code> is a classic exponential-moving-average filter, equivalent to the discretization of the ODE <code>&xacute;(t) = -&kappa;&middot;(x &minus; baseline)</code> with <code>&kappa; = -ln(1-alpha)</code>. Composed with the jitter step, it forms an Ornstein-Uhlenbeck-like process: <em>x</em><sub>t+1</sub> = (1&minus;&alpha;)(<em>x</em><sub>t</sub> + &delta;<sub>t</sub>) + &alpha;&middot;baseline. The stationary distribution has mean equal to <code>baseline</code> and variance proportional to <code>ratio<sup>2</sup>/(2&alpha;)</code>, which means tightening &alpha; (faster snap) reduces effective noise without requiring a smaller jitter ratio. The optional <code>baseline_jitter</code> flag lets the baseline itself drift slowly &mdash; this is how the system models long-horizon adaptation without losing short-horizon stability.
+</p>
+</div>
+
+<h3 id="how-crystalize">4.3 &nbsp; Crystalize propagation</h3>
+
+<div class="box grug">
+<p>solid rock plus solid rock = solid rock. solid rock plus wiggly rock = wiggly rock. one wiggly rock pollute everything. like one drop of mud in clean water &mdash; whole bucket muddy now. this rule is "all-or-nothing". keep it simple. you want exact answer? freeze every input. one stray un-frozen rock and your nice exact chain becomes wiggly again. this is intentional. this is what stop sneaky bugs where you forgot one value was loose.</p>
+</div>
+
+<div class="box academic">
+<p>
+Crystalization defines a two-element lattice <code>{loose, frozen}</code> with <code>loose</code> as the absorbing element. The propagation rule is <code>output = frozen iff &forall;i: input<sub>i</sub> = frozen</code>. This is the <em>conjunctive</em> rule, in contrast to the <em>disjunctive</em> rule (any frozen input freezes the output) commonly seen in dimensional-analysis libraries.
+</p>
+<p>
+The conjunctive choice is motivated by the <strong>contamination semantics</strong> we want: if any input has been re-randomized somewhere upstream, the user almost always wants the downstream value to stay re-randomized too &mdash; otherwise an accidental round-trip through a non-crystalized path would silently restore exactness, masking the upstream change. The cost of this rule is that to get a fully-exact computation the user must crystalize <em>every</em> input boundary, which is a small price for the discipline it forces.
+</p>
+<p>
+The implementation lives in <code>_maybe_jitter(result, all_crystalized)</code>. When <code>all_crystalized = true</code>, the result is wrapped in <code>Crystalized{Float64}</code> so that subsequent ops up the call stack can re-evaluate the predicate; otherwise a plain jittered <code>Float64</code> is returned, ensuring downstream <code>is_crystalized</code> tests answer <code>false</code> and the contamination propagates further.
+</p>
+</div>
+
+<h3 id="how-ambient">4.4 &nbsp; Ambient field guarantee</h3>
+
+<div class="box grug">
+<p>nothing in cave is ever fully off. always small wind. small heartbeat. small noise. why? because if everything truly zero, nothing can ever start. need tiny push to break stalemate. so every weight in voting has tiny floor. every fire chance has tiny floor. always 10% chance even weakest rock gets to speak. cave never silent. cave hum.</p>
+</div>
+
+<div class="box academic">
+<p>
+The library guarantees an <em>activation floor</em> in three places, all calibrated so that an exact-zero equilibrium is impossible by construction:
+</p>
+<ul>
+<li><code>weighted_coinflip</code> floors each weight at <code>1e-6</code>, so a zero-weight entry still has a non-zero (if vanishingly small) selection probability.</li>
+<li><code>jitter_threshold</code> clamps coin-flip thresholds into <code>[0.01, 0.99]</code>, so the threshold <code>p = 0.0</code> still fires occasionally and <code>p = 1.0</code> still misses occasionally.</li>
+<li><code>activation_probability</code> floors at <code>ACTIVATION_FLOOR = 0.1</code>: even a strength-zero bead fires 10% of rounds.</li>
+</ul>
+<p>
+This is the <em>ambient field</em> in the GrugBot420 whitepaper sense (constant &rho;<sub>17.5</sub>): a non-vanishing background activity that dissolves stalemates and prevents the population from collapsing into a fully-quiescent attractor. Mechanistically it is the analogue of cortical spontaneous firing.
+</p>
+</div>
+
+<h3 id="how-strength">4.5 &nbsp; Strength-biased activation</h3>
+
+<div class="box grug">
+<p>strong rock fire often. weak rock fire rare. but never never-fire and never always-fire. probability climb smooth from 10% (weakest) up to 90% (strongest). this is so loud rocks dominate but quiet rocks still have a voice. when many rocks fire, vote pick one by softmax-with-temperature. low temperature = soft vote (everyone has a chance). high temperature = hard vote (loudest always wins). same knob for both.</p>
+</div>
+
+<div class="box academic">
+<p>
+The activation function is the affine map <code>p(s) = ACTIVATION_FLOOR + (ACTIVATION_PEAK &minus; ACTIVATION_FLOOR) &middot; s / STRENGTH_CAP</code>, equivalently <code>p(s) = 0.1 + 0.08&middot;s</code> for <code>s &isin; [0, 10]</code>. Voting is implemented via <code>lateral_inhibition_coinflip(weights; sharpness)</code> with <code>weights<sub>i</sub> = strength<sub>i</sub> + ACTIVATION_FLOOR</code>:
+</p>
+<p style="text-align:center;">
+<code>P(i wins) &prop; exp(sharpness &middot; weight<sub>i</sub>)</code>
+</p>
+<p>
+This is a Boltzmann-Gibbs distribution with inverse temperature <code>&beta; = sharpness</code>. The two limits are unified under one parameter:
+</p>
+<ul>
+<li><strong>sharpness &rarr; 0</strong>: uniform sampling (maximum entropy, "softmax" in the loose sense).</li>
+<li><strong>sharpness &rarr; &infin;</strong>: argmax (zero entropy, "hardmax").</li>
+</ul>
+<p>
+The grave-state mechanism (apoptosis at <code>strength &le; STRENGTH_GRAVE_THRESHOLD</code>) implements use-it-or-lose-it pruning. Once grave, a bead refuses bumps &mdash; this prevents thrashing where a rarely-used pathway keeps getting reinforced just enough to never disappear. Crystalized beads are immune to both decay and grave-transition; this is how you pin "core" units that should never be culled.
+</p>
+</div>
+
+<h3 id="how-hopfield">4.6 &nbsp; Hopfield with hybrid lookup</h3>
+
+<div class="box grug">
+<p>cave-memory work like this: you walk in with a half-broken stick, cave find the closest stick it has seen, and tell you what came with that stick last time. closer match, stronger pull. but raw cosine-angle is bad &mdash; for one-number sticks, every stick points the same way, so cave thinks they all match. fix: also check how far apart sticks ARE, not just direction. blend the two. now sticks of length 1 and length 2 can be told apart. each time you ask cave for a stick, that memory gets a strength bump; ask enough times, cave freezes the memory permanent.</p>
+</div>
+
+<div class="box academic">
+<p>
+<code>HopfieldCache</code> is a content-addressable store with three innovations over the textbook Hopfield network:
+</p>
+<ol>
+<li><strong>Hybrid similarity metric.</strong> Pure cosine fails on one-dimensional keys (all positive scalars are colinear, cosine&nbsp;=&nbsp;1). The implementation blends 50% cosine + 50% normalized L2 closeness:
+<pre data-lang="math">score = 0.5 &middot; cos(key, query)
+      + 0.5 &middot; (1 &minus; min(||key-query||&#x2082; / max(||key||&#x2082;, ||query||&#x2082;), 1))</pre>
+This restores discriminability for low-dimensional keys without breaking the high-dimensional behavior.</li>
+<li><strong>Strength-driven crystalization.</strong> Each <code>recall</code> bumps the matched entry's strength by 0.1 (jittered). Once strength reaches <code>crystalize_threshold</code>, the entry is crystalized: its value stops jittering on read, and it becomes immune to eviction. This is the system's mechanism for promoting frequently-recalled associations into long-term memory.</li>
+<li><strong>Capacity-bound apoptosis.</strong> When the cache is full and a new entry needs to be stored, the weakest <em>non-crystalized</em> entry is evicted. If the cache is full of crystalized entries, the store is rejected with a <code>@warn</code> &mdash; the system tells you, loudly, rather than silently dropping the new entry or silently un-crystalizing an old one.</li>
+</ol>
+</div>
+
+<h3 id="how-turing">4.7 &nbsp; Turing-completeness argument</h3>
+
+<div class="box grug">
+<p>computer can compute anything if it has three things: way to choose (branch), way to repeat (loop), way to remember (state). grug have all three: <code>abranch</code> &amp; friends for choose, <code>aloop</code>/<code>awhile</code>/<code>arecurse</code> for repeat, <code>AnalogRegister</code> &amp; <code>AnalogAccumulator</code> for remember. so anything regular Julia can compute, grug can compute, just wiggly. this is the "turing-complete analog" claim.</p>
+</div>
+
+<div class="box academic">
+<p>
+The classical proof of Turing-completeness for any computational substrate requires three primitive capabilities: <em>conditional dispatch</em>, <em>unbounded iteration</em>, and <em>persistent state</em>. <code>AnalogTuring.jl</code> provides all three:
+</p>
+<ul>
+<li><strong>Dispatch:</strong> <code>abranch</code> (crisp), <code>afuzzy_branch</code> (probabilistic), <code>astochastic_branch</code> (N-way weighted). Any classical 2-way branch lifts to <code>abranch</code> directly.</li>
+<li><strong>Iteration:</strong> <code>aloop</code>, <code>awhile</code>, <code>auntil_converged</code>, and <code>arecurse</code>. Strictly speaking these are bounded by <code>MAX_ITERATIONS_DEFAULT = 10,000</code> and <code>max_depth = 64</code>; this is intentional &mdash; an unbounded substrate is a denial-of-service substrate. Increase the caps if you need more, but the cap exists.</li>
+<li><strong>State:</strong> <code>AnalogRegister</code> (write-once-or-many cell), <code>AnalogAccumulator</code> (decaying integrator), <code>HopfieldCache</code> (associative store), <code>Population</code> (keyed dictionary of beads).</li>
+</ul>
+<p>
+The <code>arecurse + amul</code> factorial integration test is the headline demonstration that all three compose: it is a recursive computation with conditional base case, multiplicative state composition, and the result is exact (<code>720.0</code>) when every input is crystalized &mdash; proving the analog substrate can simulate the digital one when asked, while remaining stochastic when not.
+</p>
+</div>
+
+<h3 id="how-errors">4.8 &nbsp; No-silent-failures discipline</h3>
+
+<div class="box grug">
+<p>thing break? grug must say so. loud. crash early. crash with name of function and what went wrong. never quietly return wrong number and pretend everything fine. that way, when something break, you know <em>where</em>. this is the most boring rule and the most important rule.</p>
+</div>
+
+<div class="box academic">
+<p>
+Every public function in the module follows the same error contract:
+</p>
+<ul>
+<li><strong>Input validation</strong> is the first thing in the body. <code>ArgumentError</code>, <code>DomainError</code>, <code>DivideError</code>, and <code>DimensionMismatch</code> are thrown with messages prefixed by <code>Module.function:</code> so a stack trace is sufficient to locate the failure.</li>
+<li><strong>Non-finite intermediates</strong> (<code>NaN</code>, <code>&plusmn;Inf</code>) trigger <code>@warn</code> rather than silent propagation; the warning includes the offending value and the operation that produced it.</li>
+<li><strong>Loop caps</strong> are enforced with explicit <code>throw(ErrorException(...))</code>; a non-converging fixed-point iteration never returns garbage, it raises.</li>
+<li><strong>Concurrency</strong> uses <code>ReentrantLock</code> per stateful structure (<code>AnalogRegister</code>, <code>AnalogAccumulator</code>, <code>HopfieldCache</code>, <code>Population</code>) plus a single <code>_CONFIG_LOCK</code> for global jitter knobs. No data race is possible through the public API.</li>
+<li><strong>Crystalization writes</strong> are policy-enforced: <code>set!</code> on a crystalized register issues <code>@warn</code> and is a no-op rather than silently mutating; the warning makes the semantic violation visible.</li>
+</ul>
+<p>
+This costs a small amount of branch overhead at function entry but pays for itself the first time something downstream goes weird and the stack trace points you directly at the bad input.
+</p>
+</div>
+
+</section>
+
+<script src="https://sites.super.myninja.ai/_assets/ninja-daytona-script.js"></script><!-- ================================================================== -->
+<!--                       F L O W C H A R T S                          -->
+<!-- ================================================================== -->
+<section id="flowcharts">
+<h2>Flowcharts</h2>
+
+<p>ASCII because phosphor. Each chart shows the runtime decision path for one of the load-bearing operations.</p>
+
+<h3>5.1 &nbsp; <code>jitter_value</code> &mdash; the core primitive</h3>
+<pre class="flow"><span class="lbl">[ jitter_value(x; ratio) ]</span>
+        <span class="arr">|</span>
+        <span class="arr">v</span>
+   +-----------------+
+   | ratio in        |  <span class="com"># validate input</span>
+   | [0, 0.10]?      |
+   +-----------------+
+     <span class="arr">|</span> NO       <span class="arr">|</span> YES
+     <span class="arr">v</span>          <span class="arr">v</span>
+  throw         +----------------+
+  Argument      | jitter         |
+  Error         | enabled        |  <span class="com"># global toggle</span>
+                | globally?      |
+                +----------------+
+                  <span class="arr">|</span> NO     <span class="arr">|</span> YES
+                  <span class="arr">v</span>        <span class="arr">v</span>
+              return x      +-------------------+
+                            | x == SENTINEL     |
+                            | (-9999.0)?        |
+                            +-------------------+
+                              <span class="arr">|</span> YES   <span class="arr">|</span> NO
+                              <span class="arr">v</span>      <span class="arr">v</span>
+                            return x   +----------------+
+                                       | x == 0?        |
+                                       +----------------+
+                                         <span class="arr">|</span> YES  <span class="arr">|</span> NO
+                                         <span class="arr">v</span>     <span class="arr">v</span>
+                                      return 0   +-------------------+
+                                                 | sample            |
+                                                 | δ ~ U(-r|x|, r|x|)|
+                                                 +-------------------+
+                                                            <span class="arr">|</span>
+                                                            <span class="arr">v</span>
+                                                       <span class="lbl">return x + δ</span></pre>
+
+<h3>5.2 &nbsp; <code>aadd</code> &mdash; arithmetic with crystalize propagation</h3>
+<pre class="flow"><span class="lbl">[ aadd(x, y) ]</span>
+       <span class="arr">|</span>
+       <span class="arr">v</span>
+  +---------------------+
+  | _raw(x), _raw(y)    |  <span class="com"># unwrap to Float64</span>
+  | _check_finite(...)  |  <span class="com"># warn on NaN/Inf</span>
+  +---------------------+
+       <span class="arr">|</span>
+       <span class="arr">v</span>
+   sum = a + b
+       <span class="arr">|</span>
+       <span class="arr">v</span>
+  +---------------------+
+  | is_crystalized(x)   |
+  | AND is_crystalized(y|
+  +---------------------+
+     <span class="arr">|</span> YES        <span class="arr">|</span> NO
+     <span class="arr">v</span>           <span class="arr">v</span>
+  +-------------+   +------------------+
+  | wrap sum in |   | jitter_and_snap  |
+  | Crystalized |   | (sum)            |
+  +-------------+   +------------------+
+     <span class="arr">|</span>           <span class="arr">|</span>
+     <span class="arr">v</span>           <span class="arr">v</span>
+  <span class="lbl">return ❄(s)</span>  <span class="lbl">return s'</span>      <span class="com"># jittered Float64</span></pre>
+
+<h3>5.3 &nbsp; <code>auntil_converged</code> &mdash; the stable-for-N rule</h3>
+<pre class="flow"><span class="lbl">[ auntil_converged(step, x0; tol, stable_for=3) ]</span>
+       <span class="arr">|</span>
+       <span class="arr">v</span>
+   x = x0
+   stable_count = 0
+   iter = 0
+       <span class="arr">|</span>
+       <span class="arr">v</span>
+  +---------------------------+&lt;----------+
+  | iter &lt; max_iterations?    |           |
+  +---------------------------+           |
+     <span class="arr">|</span> NO            <span class="arr">|</span> YES               |
+     <span class="arr">v</span>               <span class="arr">v</span>                  |
+  throw           x_new = step(x)         |
+  ErrorException        <span class="arr">|</span>                |
+                        <span class="arr">v</span>                |
+                  +------------------+    |
+                  | |x_new - x| &lt; tol?|   |
+                  +------------------+    |
+                    <span class="arr">|</span> YES    <span class="arr">|</span> NO          |
+                    <span class="arr">v</span>        <span class="arr">v</span>             |
+              stable_count++   stable_count = 0
+                    <span class="arr">|</span>        <span class="arr">|</span>             |
+                    <span class="arr">v</span>        <span class="arr">v</span>             |
+              +-----------+    x = x_new -+
+              | count >=  |    iter++
+              | stable_for|
+              +-----------+
+                <span class="arr">|</span> YES   <span class="arr">|</span> NO
+                <span class="arr">v</span>      <span class="arr">v</span>
+              <span class="lbl">return x</span>  loop -------------+   <span class="com"># jitter false-positive must
+                                              #  recur N times to terminate</span></pre>
+
+<h3>5.4 &nbsp; <code>HopfieldCache.recall</code> &mdash; hybrid cosine + L2</h3>
+<pre class="flow"><span class="lbl">[ recall(cache, query; min_similarity=0.5) ]</span>
+       <span class="arr">|</span>
+       <span class="arr">v</span>
+   validate query (finite, length matches stored keys)
+       <span class="arr">|</span>
+       <span class="arr">v</span>
+   for each entry e in cache:
+       cos_sim   = cosine(e.key, query)
+       l2_score  = 1 - min(||e.key - query|| / max-norm, 1)
+       score     = 0.5*cos_sim + 0.5*l2_score
+       track best (score, sim, entry)
+       <span class="arr">|</span>
+       <span class="arr">v</span>
+  +-------------------------+
+  | best_sim &gt;= min_sim     |
+  | AND best_score gate?    |
+  +-------------------------+
+     <span class="arr">|</span> NO              <span class="arr">|</span> YES
+     <span class="arr">v</span>                 <span class="arr">v</span>
+  return nothing     +------------------+
+                     | best.crystalized?|
+                     +------------------+
+                       <span class="arr">|</span> YES     <span class="arr">|</span> NO
+                       <span class="arr">v</span>        <span class="arr">v</span>
+                     v = e.value   bump strength (jittered)
+                                       <span class="arr">|</span>
+                                       <span class="arr">v</span>
+                                   strength &gt;= threshold?
+                                       <span class="arr">|</span>
+                                       <span class="arr">v</span>
+                                   YES &rarr; e.crystalized = true
+                                       <span class="arr">|</span>
+                                       <span class="arr">v</span>
+                                   v = jitter_and_snap(e.value)
+                                       <span class="arr">|</span>
+                                       <span class="arr">v</span>
+                                  <span class="lbl">return (v, best_sim)</span></pre>
+
+<h3>5.5 &nbsp; <code>Population.fire!</code> + <code>vote</code> &mdash; the firing round</h3>
+<pre class="flow"><span class="lbl">[ winner_take_all(pop) ]</span>
+       <span class="arr">|</span>
+       <span class="arr">v</span>
+   for r in 1:N_rounds:                       <span class="com"># default several rounds</span>
+   +---------------------------------------+
+   | fired = []                            |
+   | for each bead b in pop:               |
+   |   p = activation_probability(b)        |  <span class="com"># 0.1 + 0.08*strength</span>
+   |   if b.crystalized OR coinflip(p):    |
+   |     fired.push(b.id)                  |
+   +---------------------------------------+
+       <span class="arr">|</span>
+       <span class="arr">v</span>
+   +-----------------------------------+
+   | weights = [strength + FLOOR for   |  <span class="com"># ambient floor</span>
+   |            id in fired]            |
+   +-----------------------------------+
+       <span class="arr">|</span>
+       <span class="arr">v</span>
+   winner = fired[ lateral_inhibition_coinflip(weights; sharpness) ]
+       <span class="arr">|</span>
+       <span class="arr">v</span>
+   tally[winner]++
+       <span class="arr">|</span>
+       <span class="arr">v</span>
+   end for
+       <span class="arr">|</span>
+       <span class="arr">v</span>
+   <span class="lbl">return argmax(tally)</span></pre>
+
+<h3>5.6 &nbsp; Module dependency graph</h3>
+<pre class="flow"><span class="com">// arrows go from "depends on" toward "is depended on"</span>
+
+   <span class="lbl">JitterCore</span>  &lt;------+  &lt;------+  &lt;------+  &lt;------+  &lt;------+
+        <span class="arr">^</span>             |         |         |         |         |
+        |             |         |         |         |         |
+   <span class="lbl">CoinFlip</span>      |         |         |         |         |
+        <span class="arr">^</span>             |         |         |         |         |
+        |             |         |         |         |         |
+   <span class="lbl">AnalogPrimitives</span> --+         |         |         |         |
+        <span class="arr">^</span>                       |         |         |         |
+        |                       |         |         |         |
+   <span class="lbl">AnalogControl</span>  --------------+         |         |         |
+        <span class="arr">^</span>                                 |         |         |
+        |                                 |         |         |
+   <span class="lbl">AnalogMemory</span>  ---------------------------+         |         |
+        <span class="arr">^</span>                                           |         |
+        |                                           |         |
+   <span class="lbl">StrengthField</span>  --------------------------------------+         |
+        <span class="arr">^</span>                                                     |
+        |                                                     |
+   <span class="lbl">AnalogTuring</span> (umbrella) -------------------------------------+</pre>
+
+</section>
+
+<!-- ================================================================== -->
+<!--                       D E S I G N                                  -->
+<!-- ================================================================== -->
+<section id="design">
+<h2>Design constants</h2>
+
+<p>The numbers below are load-bearing. Each was chosen against a specific failure mode &mdash; changing any of them by more than a small fraction will cause one or more tests to flap or fail. They are exposed as exported constants so a user can adapt them, but treat any change as a deliberate design decision.</p>
+
+<table>
+<thead>
+<tr><th>Constant</th><th>Default</th><th>Why this number</th></tr>
+</thead>
+<tbody>
+<tr>
+<td><code>JITTER_RATIO_DEFAULT</code></td>
+<td><code>0.03</code></td>
+<td>3% feels analog (visible wiggle in the REPL) without breaking convergence in <code>auntil_converged</code>. Below 1% the jitter is invisible to the user; above 5% Newton's method needs many extra iterations.</td>
+</tr>
+<tr>
+<td><code>JITTER_RATIO_MAX</code></td>
+<td><code>0.10</code></td>
+<td>Empirical ceiling. Above 10%, the multiplicative chain bound <code>(1+r)<sup>N</sup></code> grows too fast for typical N; the Hopfield blended-similarity gate becomes non-monotonic.</td>
+</tr>
+<tr>
+<td><code>CRYSTALIZE_SENTINEL</code></td>
+<td><code>-9999.0</code></td>
+<td>Reserved exact-passthrough. Not a magic <code>NaN</code> because we want it to compare and arithmetize like a normal number through C-style code paths.</td>
+</tr>
+<tr>
+<td><code>MAX_ITERATIONS_DEFAULT</code></td>
+<td><code>10_000</code></td>
+<td>Universal loop cap. Big enough for honest iterative numerics, small enough that an infinite loop is caught in well under a second on any reasonable hardware.</td>
+</tr>
+<tr>
+<td><code>CONVERGENCE_TOL_DEFAULT</code></td>
+<td><code>1e-6</code></td>
+<td>About one part per million &mdash; below the floor of <code>Float32</code> noise but above what jitter typically introduces at default ratio.</td>
+</tr>
+<tr>
+<td><code>STRENGTH_FLOOR / STRENGTH_CAP</code></td>
+<td><code>0.0 / 10.0</code></td>
+<td>One decade of dynamic range. Wide enough that bumps and decays produce visible competition, narrow enough that <code>activation_probability</code> stays in <code>[FLOOR, PEAK]</code> with linear scaling.</td>
+</tr>
+<tr>
+<td><code>STRENGTH_GRAVE_THRESHOLD</code></td>
+<td><code>0.05</code></td>
+<td>1/200 of the cap. Beads below this are functionally dead; setting it to 0 would let beads loiter at <code>1e-12</code> forever, setting it too high would prematurely kill recoverable beads.</td>
+</tr>
+<tr>
+<td><code>ACTIVATION_FLOOR / PEAK</code></td>
+<td><code>0.1 / 0.9</code></td>
+<td>Symmetric 10%/90% bounds. Floor &gt; 0 prevents fully-quiescent equilibria; peak &lt; 1 prevents fully-deterministic firing &mdash; the population <em>always</em> has stochastic competition.</td>
+</tr>
+</tbody>
+</table>
+
+</section>
+
+<!-- ================================================================== -->
+<!--                          T E S T S                                 -->
+<!-- ================================================================== -->
+<section id="tests">
+<h2>Running the tests</h2>
+
+<pre data-lang="bash"><span class="cmd-prompt">cd analog-turing</span>
+<span class="cmd-prompt">julia --project=. -e 'using Pkg; Pkg.test()'</span></pre>
+
+<p>Expected output ends with:</p>
+
+<pre data-lang="text">Test Summary:              | Pass  Total  Time
+AnalogTuring.jl full suite | 2087   2087  8.0s
+     Testing AnalogTuring tests passed</pre>
+
+<p>The suite is organized into eight files under <code>test/</code>, each focused on one module plus an <code>test_integration.jl</code> that exercises composition:</p>
+
+<ul>
+<li><code>test_jitter_core.jl</code> &mdash; constants, ratio bounds, sentinel passthrough, zero handling, snap-back validation, drift bounds, AnalogValue construction (~1330 assertions).</li>
+<li><code>test_coinflip.jl</code> &mdash; <code>@coinflip</code> distribution, ambient-floor leak, weighted distribution, lateral-inhibition sharpness limits, validation throws.</li>
+<li><code>test_analog_primitives.jl</code> &mdash; arithmetic correctness, divide-by-zero, sqrt-of-negative, fuzzy-comparison shape, aselect Bernoulli, aclamp validation, crystalize propagation.</li>
+<li><code>test_analog_control.jl</code> &mdash; abranch crisp/fuzzy/stochastic, aloop with <code>:abreak</code>, awhile cap enforcement, auntil_converged contraction + non-convergence throw, factorial via arecurse, max_depth, afixed_point of cosine, aguard/aretry/awith_timeout.</li>
+<li><code>test_analog_memory.jl</code> &mdash; register read jitter, crystalize freeze, accumulator decay math, Hopfield store/recall/eviction/crystalize-threshold, recall_top_k sort, AmbientField bounds.</li>
+<li><code>test_strength_field.jl</code> &mdash; bead clamp, bump saturation, grave transition, crystalize ignores, fire/vote/winner_take_all distribution, bulk operations.</li>
+<li><code>test_integration.jl</code> &mdash; the headlines: analog factorial via arecurse+amul (exact 720 with crystalized inputs), Newton's method &radic;2 with jitter, vote loop with reinforcement (runaway dominance), Hopfield as memoization, crystalized invariants survive max-jitter rampup, retry recovers from transient asqrt(-1), ambient-field always-on guarantee.</li>
+</ul>
+</section>
+
+<!-- ================================================================== -->
+<!--                       C H A N G E L O G                            -->
+<!-- ================================================================== -->
+<section id="changelog">
+<h2>Changelog</h2>
+
+<h3>v0.1.0 &mdash; initial release</h3>
+<ul>
+<li><strong>JitterCore</strong>: <code>jitter_value</code>, <code>snap_back</code>, <code>jitter_and_snap</code>; <code>Crystalized{T}</code> wrapper with full numeric protocol; <code>AnalogValue</code> mutable cell; sentinel <code>-9999.0</code> passthrough; global enable/disable + ratio config under <code>ReentrantLock</code>.</li>
+<li><strong>CoinFlip</strong>: <code>@coinflip</code> macro plus <code>weighted_coinflip</code>, <code>biased_coinflip</code>, <code>categorical_coinflip</code>, <code>lateral_inhibition_coinflip</code> with sharpness-controlled softmax↔hardmax.</li>
+<li><strong>AnalogPrimitives</strong>: arithmetic with all-crystalized-or-jitter rule; crisp + fuzzy comparisons; aggregations; ternary <code>aselect</code>.</li>
+<li><strong>AnalogControl</strong>: <code>abranch</code>/<code>afuzzy_branch</code>/<code>astochastic_branch</code>; <code>aloop</code>/<code>awhile</code>/<code>auntil_converged</code> with stable-for-N convergence; <code>arecurse</code> with bounded depth; <code>afixed_point</code>; <code>aguard</code>/<code>aretry</code>/<code>awith_timeout</code>.</li>
+<li><strong>AnalogMemory</strong>: <code>AnalogRegister</code>, decaying <code>AnalogAccumulator</code> (extends <code>Base.accumulate!</code>); <code>HopfieldCache</code> with hybrid cosine+L2 lookup, strength-driven crystalization; <code>AmbientField</code>.</li>
+<li><strong>StrengthField</strong>: <code>StrengthBead</code> + <code>Population</code> with <code>fire!</code>, <code>vote</code>, <code>winner_take_all</code>, <code>bulk_decay!</code>/<code>bulk_reinforce!</code>, grave-state apoptosis.</li>
+<li>2087 tests passing across 8 test files.</li>
+</ul>
+</section>
+
+<!-- ================================================================== -->
+<!--                        C O L O P H O N                             -->
+<!-- ================================================================== -->
+<section id="colophon">
+<h2>Colophon</h2>
+
+<p>
+This document is hand-written HTML, served as a single static file plus one CSS sheet. Phosphor green <code>#39ff14</code> on near-black <code>#0a0e0a</code>, body text <code>#c8e6c8</code> for readable contrast. Headings in <a href="https://fonts.google.com/specimen/VT323" target="_blank">VT323</a>; body in <a href="https://fonts.google.com/specimen/IBM+Plex+Mono" target="_blank">IBM Plex Mono</a>. No JavaScript. No analytics. No cookie banner.
+</p>
+
+<p>
+The library borrows several concepts from the GrugBot420 whitepaper: bounded relative jitter (3% default), the <code>-9999.0</code> sentinel, the ambient-activation field (&rho;<sub>17.5</sub>), strength-biased coinflip, lateral inhibition with sharpness control, the strict no-silent-failures discipline, and the GRUG comment style.
+</p>
+
+<p>
+Issues, pull requests, and corrections welcome at <a href="https://github.com/grug-group420/analog-turing">github.com/grug-group420/analog-turing</a>.
+</p>
+
+<div class="banner">
++============================================================+
+|  END OF MANUAL // jitter ratio 0.03 // tests 2087 / 2087   |
+|  GRUG SAY: ROCK WIGGLE BUT ROCK COME HOME. THAT IS WAY.    |
++============================================================+
+</div>
+
+</section>
+
+</main>
+</div>
+
+<footer class="crt-foot">
+  &copy; 2025 grug-group420 &middot; MIT licensed &middot; AnalogTuring.jl v0.1.0 &middot;
+  <a href="https://github.com/grug-group420/analog-turing">github.com/grug-group420/analog-turing</a>
+</footer>
+
+</body>
+</html>
+
+<script src="https://sites.super.myninja.ai/_assets/ninja-daytona-script.js"></script>
