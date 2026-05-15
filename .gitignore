@@ -1,0 +1,18 @@
+# Julia local artifacts
+/Manifest.toml
+*.cov
+*.jl.cov
+*.jl.mem
+deps/deps.jl
+docs/build/
+docs/site/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
