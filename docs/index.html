@@ -5,24 +5,207 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="description" content="AnalogTuring.jl — make digital values behave analog. Comprehensive manual.">
 <title>AnalogTuring.jl :: Manual v0.1.0</title>
-<link rel="stylesheet" href="style.css">
-<script src="https://sites.super.myninja.ai/_assets/ninja-daytona-script.js"></script>
+<style>
+/* AnalogTuring.jl manual -- 90s minimalist. No webfonts, no images,
+   no JavaScript. System monospace, phosphor green on near-black,
+   readable contrast (~11:1). */
+
+body {
+  margin: 0 auto;
+  max-width: 920px;
+  padding: 24px 20px 60px 20px;
+  background: #0a0e0a;
+  color: #c8e6c8;
+  font-family: "Courier New", Courier, monospace;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+h1, h2, h3, h4 { color: #39ff14; font-weight: bold; }
+h1 { font-size: 28px; margin: 0 0 4px 0; }
+h2 {
+  font-size: 20px;
+  margin: 36px 0 8px 0;
+  border-bottom: 1px solid #39ff14;
+  padding-bottom: 3px;
+}
+h2::before { content: ">>> "; color: #ffb000; }
+h3 { font-size: 16px; color: #ffb000; margin: 24px 0 6px 0; }
+h3::before { content: "## "; color: #7fa07f; }
+h4 { font-size: 15px; color: #c8e6c8; margin: 16px 0 4px 0; }
+h4::before { content: "# "; color: #7fa07f; }
+
+p, ul, ol { margin: 8px 0; }
+ul, ol { padding-left: 24px; }
+li { margin: 3px 0; }
+
+a { color: #5ff5ff; }
+a:hover { color: #39ff14; }
+
+strong { color: #d6ffd6; }
+em { color: #ffb000; font-style: normal; }
+
+hr {
+  border: none;
+  border-top: 1px dashed #2c5a2c;
+  margin: 24px 0;
+}
+
+.subtitle { color: #c8e6c8; font-size: 14px; margin-bottom: 6px; }
+.meta { color: #7fa07f; font-size: 13px; margin-bottom: 18px; }
+.meta b { color: #ffb000; }
+.meta span { margin-right: 14px; }
+
+code {
+  background: #060906;
+  border: 1px solid #1f3a1f;
+  padding: 0 4px;
+  color: #d6ffd6;
+  font-family: inherit;
+}
+pre {
+  background: #060906;
+  border: 1px solid #2c5a2c;
+  border-left: 3px solid #39ff14;
+  padding: 10px 12px;
+  overflow-x: auto;
+  color: #d6ffd6;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.45;
+  margin: 12px 0;
+}
+pre code { background: transparent; border: none; padding: 0; }
+
+.box {
+  border: 1px solid #2c5a2c;
+  padding: 10px 12px;
+  margin: 12px 0;
+  background: #0f1410;
+}
+.box.grug { border-left: 3px solid #39ff14; }
+.box.grug::before {
+  content: "[ GRUG SAY ]";
+  display: block; color: #39ff14; font-weight: bold; margin-bottom: 4px;
+}
+.box.academic { border-left: 3px solid #ffb000; }
+.box.academic::before {
+  content: "[ THE ACADEMIC EXPLANATION ]";
+  display: block; color: #ffb000; font-weight: bold; margin-bottom: 4px;
+}
+.box.warn { border-left: 3px solid #ffb000; }
+.box.warn::before {
+  content: "[ ! ] WARNING";
+  display: block; color: #ffb000; font-weight: bold; margin-bottom: 4px;
+}
+.box.note { border-left: 3px solid #5ff5ff; }
+.box.note::before {
+  content: "[ i ] NOTE";
+  display: block; color: #5ff5ff; font-weight: bold; margin-bottom: 4px;
+}
+
+.api { border: 1px solid #2c5a2c; margin: 14px 0; background: #0f1410; }
+.api .sig {
+  background: #060906; border-bottom: 1px solid #2c5a2c;
+  padding: 6px 12px; color: #d6ffd6; font-size: 14px;
+}
+.api .sig .name { color: #ffb000; font-weight: bold; }
+.api .sig .arg  { color: #5ff5ff; }
+.api .sig .ret  { color: #39ff14; }
+.api .body { padding: 8px 12px; font-size: 14px; }
+.api .body p { margin: 4px 0; }
+.api .body dl { margin: 6px 0; }
+.api .body dt { color: #ffb000; font-weight: bold; margin-top: 4px; }
+.api .body dd { margin: 0 0 0 16px; }
+
+.tag { display: inline-block; font-size: 11px; padding: 0 5px;
+       border: 1px solid; margin-right: 4px; font-weight: bold; }
+.tag.exp   { color: #39ff14; border-color: #39ff14; }
+.tag.macro { color: #ff5fd2; border-color: #ff5fd2; }
+.tag.type  { color: #ffd05a; border-color: #ffd05a; }
+.tag.const { color: #5ff5ff; border-color: #5ff5ff; }
+.tag.throw { color: #ff8a8a; border-color: #ff8a8a; }
+
+table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; }
+th, td { border: 1px solid #2c5a2c; padding: 5px 8px; text-align: left; vertical-align: top; }
+th { background: #0f1410; color: #ffb000; }
+
+.flow {
+  background: #060906;
+  border: 1px solid #2c5a2c;
+  border-left: 3px solid #ffb000;
+  padding: 10px 12px;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.35;
+  white-space: pre;
+  overflow-x: auto;
+  color: #d6ffd6;
+  margin: 12px 0;
+}
+.flow .lbl { color: #ffb000; }
+.flow .arr { color: #39ff14; }
+.flow .com { color: #7fa07f; }
+
+nav.toc {
+  border: 1px solid #2c5a2c;
+  padding: 10px 14px;
+  margin: 18px 0 24px 0;
+  background: #0f1410;
+}
+nav.toc h4 { margin: 0 0 6px 0; color: #ffb000; }
+nav.toc h4::before { content: ""; }
+nav.toc ol { margin: 0; padding-left: 22px; }
+nav.toc ol ol { padding-left: 18px; }
+nav.toc a { color: #c8e6c8; text-decoration: none; }
+nav.toc a:hover { color: #39ff14; text-decoration: underline; }
+
+.banner {
+  border: 1px solid #2c5a2c;
+  background: #060906;
+  padding: 8px 12px;
+  margin: 12px 0;
+  white-space: pre;
+  overflow-x: auto;
+  color: #39ff14;
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.tok-kw  { color: #ff5fd2; }
+.tok-fn  { color: #ffb000; }
+.tok-num { color: #5ff5ff; }
+.tok-str { color: #c8ffc8; }
+.tok-com { color: #7fa07f; font-style: italic; }
+.tok-mac { color: #ff5fd2; }
+.cmd-prompt::before   { content: "$ ";      color: #39ff14; font-weight: bold; }
+.julia-prompt::before { content: "julia> "; color: #ff5fd2; font-weight: bold; }
+
+footer {
+  border-top: 1px dashed #2c5a2c;
+  margin-top: 40px;
+  padding-top: 14px;
+  color: #7fa07f;
+  font-size: 13px;
+  text-align: center;
+}
+footer a { color: #5ff5ff; }
+</style>
+
 </head>
 <body>
 
-<header class="crt-frame">
-  <h1>AnalogTuring.jl<span class="blink">_</span></h1>
+<header>
+  <h1>AnalogTuring.jl</h1>
   <div class="subtitle">// make digital values behave analog. every value wiggles, then snaps back, unless you crystalize it.</div>
   <div class="meta">
     <span>VERSION <b>0.1.0</b></span>
     <span>JULIA <b>1.9+</b></span>
     <span>TESTS <b>2087 / 2087</b></span>
     <span>LICENSE <b>MIT</b></span>
-    <span>REPO <b><a href="https://github.com/grug-group420/analog-turing" style="color:#39ff14">grug-group420 / analog-turing</a></b></span>
+    <span>REPO <b><a href="https://github.com/grug-group420/analog-turing">grug-group420 / analog-turing</a></b></span>
   </div>
 </header>
-
-<div class="wrap">
 
 <!-- ================================================================== -->
 <!--                              T O C                                 -->
@@ -79,8 +262,6 @@
     <li><a href="#colophon">Colophon</a></li>
   </ol>
 </nav>
-
-<main>
 
 <!-- ================================================================== -->
 <!--                          A B O U T                                 -->
@@ -524,7 +705,7 @@ result = <span class="tok-fn">aretry</span>(() -&gt; <span class="tok-fn">asqrt<
 </tbody>
 </table>
 
-<script src="https://sites.super.myninja.ai/_assets/ninja-daytona-script.js"></script><!-- =========== AnalogControl =========== -->
+<!-- =========== AnalogControl =========== -->
 <h3 id="api-ctrl">3.4 &nbsp; AnalogControl <a href="https://github.com/grug-group420/analog-turing/blob/main/src/AnalogControl.jl" target="_blank">[src]</a></h3>
 
 <div class="api">
@@ -698,7 +879,7 @@ result = <span class="tok-fn">aretry</span>(() -&gt; <span class="tok-fn">asqrt<
 
 </section>
 
-<script src="https://sites.super.myninja.ai/_assets/ninja-daytona-script.js"></script><!-- ================================================================== -->
+<!-- ================================================================== -->
 <!--                     H O W   I T   W O R K S                        -->
 <!-- ================================================================== -->
 <section id="how-it-works">
@@ -865,7 +1046,7 @@ This costs a small amount of branch overhead at function entry but pays for itse
 
 </section>
 
-<script src="https://sites.super.myninja.ai/_assets/ninja-daytona-script.js"></script><!-- ================================================================== -->
+<!-- ================================================================== -->
 <!--                       F L O W C H A R T S                          -->
 <!-- ================================================================== -->
 <section id="flowcharts">
@@ -1196,10 +1377,7 @@ Issues, pull requests, and corrections welcome at <a href="https://github.com/gr
 
 </section>
 
-</main>
-</div>
-
-<footer class="crt-foot">
+<footer>
   &copy; 2025 grug-group420 &middot; MIT licensed &middot; AnalogTuring.jl v0.1.0 &middot;
   <a href="https://github.com/grug-group420/analog-turing">github.com/grug-group420/analog-turing</a>
 </footer>
@@ -1207,4 +1385,3 @@ Issues, pull requests, and corrections welcome at <a href="https://github.com/gr
 </body>
 </html>
 
-<script src="https://sites.super.myninja.ai/_assets/ninja-daytona-script.js"></script>
